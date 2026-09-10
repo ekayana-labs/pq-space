@@ -1,8 +1,10 @@
 # pq-space
 
 [![CI](https://github.com/ekayana-labs/pq-space/actions/workflows/main.yml/badge.svg)](https://github.com/ekayana-labs/pq-space/actions/workflows/main.yml)
-[![MSRV](https://img.shields.io/badge/msrv-1.90.0-blue)](rust-toolchain.toml)
-[![license](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
+[![crates.io](https://img.shields.io/crates/v/pq-space.svg)](https://crates.io/crates/pq-space)
+[![docs.rs](https://img.shields.io/docsrs/pq-space)](https://docs.rs/pq-space)
+[![MSRV](https://img.shields.io/crates/msrv/pq-space)](Cargo.toml)
+[![license](https://img.shields.io/crates/l/pq-space)](LICENSE)
 [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/ekayana-labs/pq-space/badge)](https://scorecard.dev/viewer/?uri=github.com/ekayana-labs/pq-space)
 
 Post-quantum private space primitives for storage built on UCAN: **`did:bio`
