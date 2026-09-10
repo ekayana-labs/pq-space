@@ -1,0 +1,22 @@
+[package]
+name = "pq-space"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.90.0"
+description = "Post-quantum private space primitives for UCAN storage: did:bio principals for pq-ucan alongside Ed25519 and ML-DSA-87 did:key, and ML-KEM-1024 content key wrapping delegated inside UCANs"
+license = "MIT"
+repository = "https://github.com/ekayana-labs/pq-space"
+readme = "README.md"
+keywords = ["ucan", "post-quantum", "ml-kem", "ml-dsa", "did"]
+categories = ["cryptography", "authentication"]
+exclude = [".github/"]
+
+[dependencies]
+pq-ucan = { version = "0.1.0", default-features = false, features = ["std", "ed25519", "ml-dsa"] }
+did-bio-core = { version = "0.1.1", default-features = false }
+aws-lc-rs = "1.18"
+bs58 = "0.5"
+thiserror = "2"
+
+[dev-dependencies]
+testresult = "0.4"
