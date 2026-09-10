@@ -169,6 +169,54 @@ impl WrappedContentKey {
 
         <[u8; CONTENT_KEY_LEN]>::try_from(&*plaintext).map_err(|_| Error::Crypto)
     }
+
+    /// Encode as IPLD for embedding in a delegation's `meta` map.
+    #[must_use]
+    pub fn to_ipld(&self) -> Ipld {
+        let mut map = BTreeMap::new();
+        map.insert("alg".to_string(), Ipld::String(WRAP_ALGORITHM.to_string()));
+        map.insert("ct".to_string(), Ipld::Bytes(self.kem_ciphertext.clone()));
+        map.insert("iv".to_string(), Ipld::Bytes(self.nonce.to_vec()));
+        map.insert("key".to_string(), Ipld::Bytes(self.sealed_key.clone()));
+        Ipld::Map(map)
+    }
+
+    /// Decode from the IPLD form produced by [`WrappedContentKey::to_ipld`].
+    pub fn from_ipld(ipld: &Ipld) -> Result<Self, Error> {
+        let Ipld::Map(map) = ipld else {
+            return Err(Error::Encoding("wrapped key must be a map"));
+        };
+        match map.get("alg") {
+            Some(Ipld::String(alg)) if alg == WRAP_ALGORITHM => {}
+            _ => return Err(Error::Encoding("unsupported wrap algorithm")),
+        }
+        let Some(Ipld::Bytes(ciphertext)) = map.get("ct") else {
+            return Err(Error::Encoding("missing `ct` bytes"));
+        };
+        let Some(Ipld::Bytes(iv)) = map.get("iv") else {
+            return Err(Error::Encoding("missing `iv` bytes"));
+        };
+        let Some(Ipld::Bytes(sealed_key)) = map.get("key") else {
+            return Err(Error::Encoding("missing `key` bytes"));
+        };
+        let nonce = <[u8; NONCE_LEN]>::try_from(iv.as_slice())
+            .map_err(|_| Error::Encoding("`iv` must be 12 bytes"))?;
+        Ok(WrappedContentKey {
+            kem_ciphertext: ciphertext.clone(),
+            nonce,
+            sealed_key: sealed_key.clone(),
+        })
+    }
+
+    /// Insert into a delegation `meta` map under [`META_KEY`].
+    pub fn attach_to_meta(&self, meta: &mut BTreeMap<String, Ipld>) {
+        meta.insert(META_KEY.to_string(), self.to_ipld());
+    }
+
+    /// Extract from a delegation `meta` map, if present.
+    pub fn from_meta(meta: &BTreeMap<String, Ipld>) -> Option<Result<Self, Error>> {
+        meta.get(META_KEY).map(Self::from_ipld)
+    }
 }
 
 /// The conventional AAD: the delegation's subject and command.
