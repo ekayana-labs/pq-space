@@ -111,3 +111,70 @@ impl Signer for BioSigner {
         self.did.clone()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use pq_ucan::crypto::ml_dsa::MlDsaKeypair;
+    use testresult::TestResult;
+
+    use super::*;
+
+    #[test]
+    fn signer_names_its_did_and_the_resolver_finds_its_key() -> TestResult {
+        let signer = BioSigner::from_seed(Network::Devnet, &[5u8; 32])?;
+        let did = signer.did();
+        assert!(did.as_str().starts_with("did:bio:devnet:"));
+        assert_eq!(signer.network(), Network::Devnet);
+        assert_eq!(bio_of(&did).as_ref(), Some(signer.bio()));
+        assert_eq!(did_of(signer.bio())?, did);
+        assert_eq!(&BioResolver.resolve(&did)?, signer.public_key());
+
+        // Mainnet identifiers carry no network segment.
+        let mainnet = BioSigner::from_seed(Network::Mainnet, &[5u8; 32])?;
+        assert_eq!(mainnet.did().as_str().matches(':').count(), 2);
+        assert_eq!(
+            bio_of(&mainnet.did()).map(|b| b.network),
+            Some(Network::Mainnet)
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn a_signature_verifies_under_the_resolved_key() -> TestResult {
+        let signer = BioSigner::from_seed(Network::Devnet, &[5u8; 32])?;
+        let signature = signer.sign(b"msg")?;
+        let key = BioResolver.resolve(&signer.did())?;
+        key.verify(b"msg", &signature)?;
+        assert!(key.verify(b"other", &signature).is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn did_key_still_resolves_through_the_bio_resolver() -> TestResult {
+        let classical = Ed25519Keypair::from_seed(&[6u8; 32]);
+        assert_eq!(
+            &BioResolver.resolve(&classical.did())?,
+            classical.public_key()
+        );
+        let quantum = MlDsaKeypair::from_seed(Algorithm::MlDsa87, &[7u8; 32])?;
+        assert_eq!(&BioResolver.resolve(&quantum.did())?, quantum.public_key());
+        Ok(())
+    }
+
+    #[test]
+    fn rejects_what_it_cannot_resolve() -> TestResult {
+        let web = Did::parse("did:web:example.com")?;
+        assert!(matches!(
+            BioResolver.resolve(&web),
+            Err(ResolveError::UnsupportedMethod)
+        ));
+        let short = Did::parse("did:bio:devnet:short")?;
+        assert!(matches!(
+            BioResolver.resolve(&short),
+            Err(ResolveError::Failed(_))
+        ));
+        assert_eq!(bio_of(&short), None);
+        assert_eq!(bio_of(&web), None);
+        Ok(())
+    }
+}
