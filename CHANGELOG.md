@@ -6,6 +6,10 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-09-10
+
+First release.
+
 ### Added
 
 - `BioSigner` and `BioResolver`: a `did:bio` identity as a pq-ucan signer
@@ -19,4 +23,5 @@ adheres to [Semantic Versioning](https://semver.org/).
   form of an ML-KEM-1024 encapsulation key, so a space owner can publish
   one in a DID document service entry under `SPACE_KEY_SERVICE_TYPE`.
 
-[Unreleased]: https://github.com/ekayana-labs/pq-space/commits/main
+[Unreleased]: https://github.com/ekayana-labs/pq-space/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/ekayana-labs/pq-space/releases/tag/v0.1.0
