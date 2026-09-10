@@ -301,3 +301,153 @@ pub fn space_aad(subject: &str, command: &str) -> Vec<u8> {
     aad.extend_from_slice(command.as_bytes());
     aad
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use testresult::TestResult;
+
+    #[test]
+    fn wrap_unwrap_round_trip() -> TestResult {
+        let recipient = SpaceKeyPair::generate()?;
+        let content_key = [42u8; CONTENT_KEY_LEN];
+        let aad = space_aad("did:bio:devnet:subject", "/space/blob/get");
+
+        let wrapped =
+            WrappedContentKey::wrap(&recipient.encapsulation_key_bytes()?, &content_key, &aad)?;
+        assert_eq!(wrapped.kem_ciphertext.len(), 1568);
+
+        let recovered = wrapped.unwrap_key(&recipient, &aad)?;
+        assert_eq!(recovered, content_key);
+        Ok(())
+    }
+
+    #[test]
+    fn wrong_aad_recipient_or_tamper_fails() -> TestResult {
+        let recipient = SpaceKeyPair::generate()?;
+        let other = SpaceKeyPair::generate()?;
+        let content_key = [7u8; CONTENT_KEY_LEN];
+        let aad = space_aad("did:bio:devnet:subject", "/space/blob/get");
+
+        let wrapped =
+            WrappedContentKey::wrap(&recipient.encapsulation_key_bytes()?, &content_key, &aad)?;
+
+        assert!(wrapped.unwrap_key(&recipient, b"different aad").is_err());
+        assert!(wrapped.unwrap_key(&other, &aad).is_err());
+
+        let mut tampered = wrapped.clone();
+        tampered.sealed_key[0] ^= 1;
+        assert!(tampered.unwrap_key(&recipient, &aad).is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn decapsulation_key_persists() -> TestResult {
+        let recipient = SpaceKeyPair::generate()?;
+        let content_key = [3u8; CONTENT_KEY_LEN];
+        let wrapped =
+            WrappedContentKey::wrap(&recipient.encapsulation_key_bytes()?, &content_key, b"")?;
+
+        let restored =
+            SpaceKeyPair::from_decapsulation_key_bytes(&recipient.decapsulation_key_bytes()?)?;
+        assert_eq!(wrapped.unwrap_key(&restored, b"")?, content_key);
+        Ok(())
+    }
+
+    #[test]
+    fn ipld_round_trip_and_meta() -> TestResult {
+        let recipient = SpaceKeyPair::generate()?;
+        let wrapped = WrappedContentKey::wrap(
+            &recipient.encapsulation_key_bytes()?,
+            &[1u8; CONTENT_KEY_LEN],
+            b"aad",
+        )?;
+
+        let decoded = WrappedContentKey::from_ipld(&wrapped.to_ipld())?;
+        assert_eq!(decoded, wrapped);
+
+        let mut meta = BTreeMap::new();
+        wrapped.attach_to_meta(&mut meta);
+        let from_meta = WrappedContentKey::from_meta(&meta).expect("present")?;
+        assert_eq!(from_meta, wrapped);
+
+        assert!(WrappedContentKey::from_ipld(&Ipld::String("nope".into())).is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn encapsulation_key_survives_a_did_document() -> TestResult {
+        let recipient = SpaceKeyPair::generate()?;
+        let published = recipient.encapsulation_key_multibase()?;
+
+        // What a wrapper does after resolving the owner's DID: read the
+        // service entry, decode, wrap.
+        let decoded = decode_encapsulation_key(&published)?;
+        assert_eq!(decoded, recipient.encapsulation_key_bytes()?);
+        assert_eq!(decoded.len(), ENCAPSULATION_KEY_LEN);
+
+        let wrapped = WrappedContentKey::wrap(&decoded, &[9u8; CONTENT_KEY_LEN], b"aad")?;
+        assert_eq!(
+            wrapped.unwrap_key(&recipient, b"aad")?,
+            [9u8; CONTENT_KEY_LEN]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn encapsulation_key_decoding_rejects_the_near_misses() -> TestResult {
+        let recipient = SpaceKeyPair::generate()?;
+        let good = recipient.encapsulation_key_multibase()?;
+
+        assert!(
+            decode_encapsulation_key(&good[1..]).is_err(),
+            "no multibase header"
+        );
+        assert!(decode_encapsulation_key("z0OIl").is_err(), "not base58btc");
+        assert!(decode_encapsulation_key("z").is_err(), "empty payload");
+
+        // An Ed25519 Multikey is the value most likely to be pasted into
+        // the wrong service entry.
+        let mut ed25519 = Vec::new();
+        write_uvarint(&mut ed25519, 0xed);
+        ed25519.extend_from_slice(&[0u8; 32]);
+        let ed25519 = format!("z{}", bs58::encode(ed25519).into_string());
+        assert!(
+            decode_encapsulation_key(&ed25519).is_err(),
+            "wrong multicodec"
+        );
+
+        // Right prefix, truncated key.
+        let mut short = Vec::new();
+        write_uvarint(&mut short, ML_KEM_1024_MULTICODEC);
+        short.extend_from_slice(&[0u8; 32]);
+        let short = format!("z{}", bs58::encode(short).into_string());
+        assert!(decode_encapsulation_key(&short).is_err(), "wrong length");
+        Ok(())
+    }
+
+    #[test]
+    fn varint_round_trips_the_codes_we_encode() {
+        for value in [
+            0,
+            0x7f,
+            0x80,
+            0xed,
+            ML_KEM_1024_MULTICODEC,
+            0x1212,
+            u64::MAX >> 1,
+        ] {
+            let mut bytes = Vec::new();
+            write_uvarint(&mut bytes, value);
+            let (decoded, consumed) = read_uvarint(&bytes).expect("round trip");
+            assert_eq!((decoded, consumed), (value, bytes.len()), "{value:#x}");
+        }
+        // The multicodec prefix the multiformats table specifies.
+        let mut bytes = Vec::new();
+        write_uvarint(&mut bytes, ML_KEM_1024_MULTICODEC);
+        assert_eq!(bytes, [0x8d, 0x24]);
+
+        assert!(read_uvarint(&[]).is_err());
+        assert!(read_uvarint(&[0x80; 4]).is_err(), "unterminated");
+    }
+}
