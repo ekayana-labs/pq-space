@@ -41,6 +41,7 @@ pub const META_KEY: &str = "space/key";
 pub const SPACE_KEY_SERVICE_TYPE: &str = "SpaceEncapsulationKey";
 
 const HKDF_INFO: &[u8] = b"pq-space/v1/content-key-wrap";
+
 /// A recipient's ML-KEM-1024 key pair (FIPS 203).
 ///
 /// The decapsulation key stays with its owner; only the encapsulation key
@@ -87,6 +88,78 @@ impl SpaceKeyPair {
             .as_ref()
             .to_vec())
     }
+
+    /// The encapsulation key in the form a DID document carries under
+    /// [`SPACE_KEY_SERVICE_TYPE`].
+    pub fn encapsulation_key_multibase(&self) -> Result<String, Error> {
+        Ok(encode_encapsulation_key(&self.encapsulation_key_bytes()?))
+    }
+}
+
+/// Append `value` to `out` as an unsigned varint (multiformats LEB128).
+fn write_uvarint(out: &mut Vec<u8>, mut value: u64) {
+    loop {
+        let byte = (value & 0x7f) as u8;
+        value >>= 7;
+        if value == 0 {
+            out.push(byte);
+            return;
+        }
+        out.push(byte | 0x80);
+    }
+}
+
+/// Read an unsigned varint, returning the value and its length.
+fn read_uvarint(bytes: &[u8]) -> Result<(u64, usize), Error> {
+    for (i, &byte) in bytes.iter().enumerate().take(9) {
+        if byte & 0x80 == 0 {
+            let mut value: u64 = 0;
+            for (j, &b) in bytes[..=i].iter().enumerate() {
+                value |= u64::from(b & 0x7f) << (7 * j);
+            }
+            return Ok((value, i + 1));
+        }
+    }
+    Err(Error::Encoding("malformed multicodec varint"))
+}
+
+/// Encode an ML-KEM-1024 encapsulation key as base58btc over its
+/// multicodec prefix, the shape a `Multikey` uses.
+///
+/// ```
+/// use pq_space::{encode_encapsulation_key, ENCAPSULATION_KEY_LEN};
+///
+/// let encoded = encode_encapsulation_key(&[0u8; ENCAPSULATION_KEY_LEN]);
+/// assert!(encoded.starts_with('z'));
+/// ```
+#[must_use]
+pub fn encode_encapsulation_key(key: &[u8]) -> String {
+    let mut bytes = Vec::with_capacity(2 + key.len());
+    write_uvarint(&mut bytes, ML_KEM_1024_MULTICODEC);
+    bytes.extend_from_slice(key);
+    format!("z{}", bs58::encode(bytes).into_string())
+}
+
+/// Decode what [`encode_encapsulation_key`] produced.
+///
+/// The length check is not redundant: ML-KEM would otherwise reject a
+/// malformed key at encapsulation time, far from where it was read.
+pub fn decode_encapsulation_key(multibase: &str) -> Result<Vec<u8>, Error> {
+    let encoded = multibase
+        .strip_prefix('z')
+        .ok_or(Error::Encoding("expected multibase `z` (base58btc)"))?;
+    let bytes = bs58::decode(encoded)
+        .into_vec()
+        .map_err(|_| Error::Encoding("invalid base58btc payload"))?;
+    let (code, consumed) = read_uvarint(&bytes)?;
+    if code != ML_KEM_1024_MULTICODEC {
+        return Err(Error::Encoding("not an mlkem-1024-pub multicodec prefix"));
+    }
+    let key = &bytes[consumed..];
+    if key.len() != ENCAPSULATION_KEY_LEN {
+        return Err(Error::Encoding("encapsulation key must be 1568 bytes"));
+    }
+    Ok(key.to_vec())
 }
 
 fn derive_wrap_key(shared_secret: &[u8]) -> Result<[u8; 32], Error> {
