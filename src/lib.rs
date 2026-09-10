@@ -10,6 +10,41 @@
 //!    delegation's `meta` map under [`META_KEY`], so no custody service
 //!    sits in the path.
 //!
+//! ```
+//! use pq_space::{space_aad, BioResolver, BioSigner, Network, SpaceKeyPair, WrappedContentKey};
+//! use pq_ucan::{
+//!     command::Command,
+//!     crypto::{ml_dsa::MlDsaKeypair, Algorithm, Signer},
+//!     delegation::{Delegation, Subject},
+//!     nonce::Nonce,
+//!     time::Timestamp,
+//! };
+//!
+//! # fn main() -> Result<(), Box<dyn std::error::Error>> {
+//! let researcher = BioSigner::from_seed(Network::Devnet, &[5; 32])?;
+//! let device = MlDsaKeypair::from_seed(Algorithm::MlDsa87, &[6; 32])?;
+//! let device_kem = SpaceKeyPair::generate()?;
+//!
+//! let space = researcher.did();
+//! let aad = space_aad(space.as_str(), "/space/blob/get");
+//! let wrapped =
+//!     WrappedContentKey::wrap(&device_kem.encapsulation_key_bytes()?, &[42; 32], &aad)?;
+//! let mut meta = std::collections::BTreeMap::new();
+//! wrapped.attach_to_meta(&mut meta);
+//!
+//! let delegation =
+//!     Delegation::builder(device.did(), Subject::Did(space), Command::parse("/space/blob/get")?)
+//!         .meta(meta)
+//!         .nonce(Nonce::from_bytes(&[1; 12]))
+//!         .expires_at(Timestamp::from_unix(1_800_000_000)?)
+//!         .sign(&researcher)?;
+//!
+//! delegation.verify(&BioResolver)?;
+//! let carried = WrappedContentKey::from_meta(delegation.meta()).expect("attached")?;
+//! assert_eq!(carried.unwrap_key(&device_kem, &aad)?, [42; 32]);
+//! # Ok(())
+//! # }
+//! ```
 
 #![forbid(unsafe_code)]
 #![deny(missing_docs)]
