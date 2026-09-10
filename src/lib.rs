@@ -15,5 +15,10 @@
 #![deny(missing_docs)]
 
 mod error;
+pub mod principal;
+
+pub use did_bio_core;
+pub use pq_ucan;
 
 pub use error::Error;
+pub use principal::{bio_of, did_of, BioDid, BioResolver, BioSigner, Network};
