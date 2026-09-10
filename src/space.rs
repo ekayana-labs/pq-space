@@ -88,3 +88,95 @@ impl SpaceKeyPair {
             .to_vec())
     }
 }
+
+fn derive_wrap_key(shared_secret: &[u8]) -> Result<[u8; 32], Error> {
+    let prk = hkdf::Salt::new(hkdf::HKDF_SHA256, &[]).extract(shared_secret);
+    let okm = prk
+        .expand(&[HKDF_INFO], &AES_256_GCM)
+        .map_err(|_| Error::Crypto)?;
+    let mut key = [0u8; 32];
+    okm.fill(&mut key).map_err(|_| Error::Crypto)?;
+    Ok(key)
+}
+
+/// A content key wrapped to one recipient's ML-KEM-1024 key.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WrappedContentKey {
+    /// The ML-KEM-1024 ciphertext, 1568 bytes.
+    pub kem_ciphertext: Vec<u8>,
+    /// The AES-256-GCM nonce.
+    pub nonce: [u8; NONCE_LEN],
+    /// The sealed key: 32 bytes of key, then the 16 byte tag.
+    pub sealed_key: Vec<u8>,
+}
+
+impl WrappedContentKey {
+    /// Wrap `content_key` to the recipient's encapsulation key.
+    ///
+    /// `aad` must be presented unchanged when unwrapping. Bind at least
+    /// the subject and command, as [`space_aad`] does, so a wrap lifted
+    /// into another delegation does not open.
+    pub fn wrap(
+        recipient_encapsulation_key: &[u8],
+        content_key: &[u8; CONTENT_KEY_LEN],
+        aad: &[u8],
+    ) -> Result<Self, Error> {
+        let encapsulation_key =
+            kem::EncapsulationKey::new(&kem::ML_KEM_1024, recipient_encapsulation_key)
+                .map_err(|_| Error::Crypto)?;
+        let (ciphertext, shared_secret) =
+            encapsulation_key.encapsulate().map_err(|_| Error::Crypto)?;
+
+        let wrap_key = derive_wrap_key(shared_secret.as_ref())?;
+        let aead_key =
+            RandomizedNonceKey::new(&AES_256_GCM, &wrap_key).map_err(|_| Error::Crypto)?;
+
+        let mut sealed_key = content_key.to_vec();
+        let nonce = aead_key
+            .seal_in_place_append_tag(Aad::from(aad), &mut sealed_key)
+            .map_err(|_| Error::Crypto)?;
+
+        let mut nonce_bytes = [0u8; NONCE_LEN];
+        nonce_bytes.copy_from_slice(nonce.as_ref());
+
+        Ok(WrappedContentKey {
+            kem_ciphertext: ciphertext.as_ref().to_vec(),
+            nonce: nonce_bytes,
+            sealed_key,
+        })
+    }
+
+    /// Recover the content key, given the same `aad` used to wrap.
+    pub fn unwrap_key(
+        &self,
+        recipient: &SpaceKeyPair,
+        aad: &[u8],
+    ) -> Result<[u8; CONTENT_KEY_LEN], Error> {
+        let shared_secret = recipient
+            .decapsulation_key
+            .decapsulate(kem::Ciphertext::from(self.kem_ciphertext.as_slice()))
+            .map_err(|_| Error::Crypto)?;
+
+        let wrap_key = derive_wrap_key(shared_secret.as_ref())?;
+        let aead_key =
+            RandomizedNonceKey::new(&AES_256_GCM, &wrap_key).map_err(|_| Error::Crypto)?;
+
+        let nonce = Nonce::try_assume_unique_for_key(&self.nonce).map_err(|_| Error::Crypto)?;
+        let mut buffer = self.sealed_key.clone();
+        let plaintext = aead_key
+            .open_in_place(nonce, Aad::from(aad), &mut buffer)
+            .map_err(|_| Error::Crypto)?;
+
+        <[u8; CONTENT_KEY_LEN]>::try_from(&*plaintext).map_err(|_| Error::Crypto)
+    }
+}
+
+/// The conventional AAD: the delegation's subject and command.
+#[must_use]
+pub fn space_aad(subject: &str, command: &str) -> Vec<u8> {
+    let mut aad = Vec::with_capacity(subject.len() + 1 + command.len());
+    aad.extend_from_slice(subject.as_bytes());
+    aad.push(b'|');
+    aad.extend_from_slice(command.as_bytes());
+    aad
+}

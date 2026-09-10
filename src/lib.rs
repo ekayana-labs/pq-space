@@ -24,6 +24,6 @@ pub use pq_ucan;
 pub use error::Error;
 pub use principal::{bio_of, did_of, BioDid, BioResolver, BioSigner, Network};
 pub use space::{
-    SpaceKeyPair, CONTENT_KEY_LEN, ENCAPSULATION_KEY_LEN, META_KEY, ML_KEM_1024_MULTICODEC,
-    SPACE_KEY_SERVICE_TYPE, WRAP_ALGORITHM,
+    space_aad, SpaceKeyPair, WrappedContentKey, CONTENT_KEY_LEN, ENCAPSULATION_KEY_LEN, META_KEY,
+    ML_KEM_1024_MULTICODEC, SPACE_KEY_SERVICE_TYPE, WRAP_ALGORITHM,
 };
