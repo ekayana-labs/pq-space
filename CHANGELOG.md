@@ -6,6 +6,14 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-09-17
+
+### Changed
+
+- `did-bio-core` 0.1.2: `BioDid` and `Network` now come from the release that knows owned subjects,
+  so a `did:bio` principal can name a wallet-owned asset DID. Consumers must move to the same `did-bio-core` generation.
+- `pq-ucan` 0.1.1, the release with detached signing, so a space can be delegated by a key the builder never holds.
+
 ## [0.1.0] - 2026-09-10
 
 First release.
@@ -23,5 +31,6 @@ First release.
   form of an ML-KEM-1024 encapsulation key, so a space owner can publish
   one in a DID document service entry under `SPACE_KEY_SERVICE_TYPE`.
 
-[Unreleased]: https://github.com/ekayana-labs/pq-space/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/ekayana-labs/pq-space/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/ekayana-labs/pq-space/releases/tag/v0.1.1
 [0.1.0]: https://github.com/ekayana-labs/pq-space/releases/tag/v0.1.0
