@@ -17,6 +17,8 @@ did-bio-core = { version = "0.1.2", default-features = false }
 aws-lc-rs = "1.18"
 bs58 = "0.5"
 thiserror = "2"
+zeroize = "1"
 
 [dev-dependencies]
+did-bio-core = { version = "0.1.2", features = ["pda"] }
 testresult = "0.4"

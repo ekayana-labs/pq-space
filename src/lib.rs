@@ -11,7 +11,7 @@
 //!    sits in the path.
 //!
 //! ```
-//! use pq_space::{space_aad, BioResolver, BioSigner, Network, SpaceKeyPair, WrappedContentKey};
+//! use pq_space::{space_aad_for, BioResolver, BioSigner, Network, SpaceKeyPair, WrappedContentKey};
 //! use pq_ucan::{
 //!     command::Command,
 //!     crypto::{ml_dsa::MlDsaKeypair, Algorithm, Signer},
@@ -26,18 +26,18 @@
 //! let device_kem = SpaceKeyPair::generate()?;
 //!
 //! let space = researcher.did();
-//! let aad = space_aad(space.as_str(), "/space/blob/get");
+//! let command = Command::parse("/space/blob/get")?;
+//! let aad = space_aad_for(&space, &command);
 //! let wrapped =
 //!     WrappedContentKey::wrap(&device_kem.encapsulation_key_bytes()?, &[42; 32], &aad)?;
 //! let mut meta = std::collections::BTreeMap::new();
 //! wrapped.attach_to_meta(&mut meta);
 //!
-//! let delegation =
-//!     Delegation::builder(device.did(), Subject::Did(space), Command::parse("/space/blob/get")?)
-//!         .meta(meta)
-//!         .nonce(Nonce::from_bytes(&[1; 12]))
-//!         .expires_at(Timestamp::from_unix(1_800_000_000)?)
-//!         .sign(&researcher)?;
+//! let delegation = Delegation::builder(device.did(), Subject::Did(space), command)
+//!     .meta(meta)
+//!     .nonce(Nonce::from_bytes(&[1; 12]))
+//!     .expires_at(Timestamp::from_unix(1_800_000_000)?)
+//!     .sign(&researcher)?;
 //!
 //! delegation.verify(&BioResolver)?;
 //! let carried = WrappedContentKey::from_meta(delegation.meta()).expect("attached")?;
@@ -59,7 +59,8 @@ pub use pq_ucan;
 pub use error::Error;
 pub use principal::{bio_of, did_of, BioDid, BioResolver, BioSigner, Network};
 pub use space::{
-    decode_encapsulation_key, encode_encapsulation_key, space_aad, SpaceKeyPair, WrappedContentKey,
-    CONTENT_KEY_LEN, ENCAPSULATION_KEY_LEN, META_KEY, ML_KEM_1024_MULTICODEC,
-    SPACE_KEY_SERVICE_TYPE, WRAP_ALGORITHM,
+    decode_encapsulation_key, encode_encapsulation_key, space_aad, space_aad_for, SpaceKeyPair,
+    WrappedContentKey, CONTENT_KEY_LEN, DECAPSULATION_KEY_LEN, ENCAPSULATION_KEY_LEN,
+    KEM_CIPHERTEXT_LEN, META_KEY, ML_KEM_1024_MULTICODEC, SEALED_KEY_LEN, SPACE_KEY_SERVICE_TYPE,
+    WRAP_ALGORITHM,
 };

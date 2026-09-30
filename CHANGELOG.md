@@ -6,9 +6,38 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- `space_aad_for` builds the conventional AAD from a `Did` and a
+  `Command`. A DID cannot contain `|`, so the pair decodes one way, which
+  the string form cannot promise.
+- `DECAPSULATION_KEY_LEN`, `KEM_CIPHERTEXT_LEN` and `SEALED_KEY_LEN`.
+- Vectors under `tests/fixtures` pin the wrap format, the AAD convention
+  and the decapsulation key layout.
+- `Error` implements `PartialEq` and `Eq`.
+
 ### Changed
 
 - Moved to `pq-ucan` 0.1.2.
+- `BioResolver` says when a `did:bio` subject is owned instead of calling
+  it a bad key. Such a subject has no generative key and needs a resolver
+  backed by the registry.
+- The wrap key and the buffer a content key is opened into are zeroized
+  when dropped.
+- `wrap` rejects an encapsulation key of the wrong length with
+  `Error::Encoding` before any cryptography runs, as
+  `from_decapsulation_key_bytes` now does for a decapsulation key.
+
+### Fixed
+
+- A `SpaceKeyPair` restored with `from_decapsulation_key_bytes` could not
+  return its encapsulation key. The key is now read from the FIPS 203
+  layout of the decapsulation key and checked against the hash stored
+  beside it.
+- `decode_encapsulation_key` accepted overlong varint prefixes, so one key
+  had several text forms. It now uses the strict reader from pq-ucan.
+- `WrappedContentKey::from_ipld` accepted a ciphertext or sealed key of any
+  length and left the failure to `unwrap_key`.
 
 ## [0.1.1] - 2026-09-17
 

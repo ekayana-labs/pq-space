@@ -3,7 +3,7 @@
 use thiserror::Error;
 
 /// Errors from parsing principals and from wrapping content keys.
-#[derive(Debug, Error)]
+#[derive(Debug, Error, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum Error {
     /// A DID string is not a principal this crate supports.
