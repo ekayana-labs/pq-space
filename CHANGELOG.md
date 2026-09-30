@@ -6,6 +6,10 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- Moved to `pq-ucan` 0.1.2.
+
 ## [0.1.1] - 2026-09-17
 
 ### Changed

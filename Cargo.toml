@@ -12,7 +12,7 @@ categories = ["cryptography", "authentication"]
 exclude = [".github/"]
 
 [dependencies]
-pq-ucan = { version = "0.1.1", default-features = false, features = ["std", "ed25519", "ml-dsa"] }
+pq-ucan = { version = "0.1.2", default-features = false, features = ["std", "ed25519", "ml-dsa"] }
 did-bio-core = { version = "0.1.2", default-features = false }
 aws-lc-rs = "1.18"
 bs58 = "0.5"
