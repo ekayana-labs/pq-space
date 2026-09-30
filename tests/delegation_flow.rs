@@ -1,10 +1,10 @@
 //! A researcher's `did:bio` identity delegates read access to a device's
 //! post-quantum `did:key`, with the blob's content key wrapped inside the
-//! same signed UCAN; the device then exercises the grant.
+//! same signed UCAN. The device then exercises the grant.
 
 use std::collections::BTreeMap;
 
-use pq_space::{space_aad, BioResolver, BioSigner, Network, SpaceKeyPair, WrappedContentKey};
+use pq_space::{space_aad_for, BioResolver, BioSigner, Network, SpaceKeyPair, WrappedContentKey};
 use pq_ucan::{
     command::Command,
     crypto::{ed25519::Ed25519Keypair, ml_dsa::MlDsaKeypair, Algorithm, Signer},
@@ -29,21 +29,18 @@ fn bio_issuer_delegates_wrapped_key_to_pq_device() -> TestResult {
     let now = Timestamp::from_unix(1_800_000_000)?;
 
     let content_key = [42u8; 32];
-    let aad = space_aad(space.as_str(), COMMAND);
+    let command = Command::parse(COMMAND)?;
+    let aad = space_aad_for(&space, &command);
     let wrapped =
         WrappedContentKey::wrap(&device_kem.encapsulation_key_bytes()?, &content_key, &aad)?;
     let mut meta = BTreeMap::new();
     wrapped.attach_to_meta(&mut meta);
 
-    let delegation = Delegation::builder(
-        device.did(),
-        Subject::Did(space.clone()),
-        Command::parse(COMMAND)?,
-    )
-    .meta(meta)
-    .nonce(Nonce::from_bytes(&[1u8; 12]))
-    .expires_at(now.plus_seconds(3600))
-    .sign(&researcher)?;
+    let delegation = Delegation::builder(device.did(), Subject::Did(space.clone()), command)
+        .meta(meta)
+        .nonce(Nonce::from_bytes(&[1u8; 12]))
+        .expires_at(now.plus_seconds(3600))
+        .sign(&researcher)?;
 
     // The bytes reach the device, which decodes and verifies them.
     let received = Delegation::decode(delegation.bytes())?;
@@ -62,8 +59,8 @@ fn bio_issuer_delegates_wrapped_key_to_pq_device() -> TestResult {
     let carried = WrappedContentKey::from_meta(received.meta()).expect("wrapped key attached")?;
     assert_eq!(carried.unwrap_key(&device_kem, &aad)?, content_key);
 
-    // A copy pasted into a different grant does not open.
-    let other_aad = space_aad(space.as_str(), "/space/blob/list");
+    // A copy pasted into a grant for another command does not open.
+    let other_aad = space_aad_for(&space, &Command::parse("/space/blob/list")?);
     assert!(carried.unwrap_key(&device_kem, &other_aad).is_err());
 
     // The device exercises the grant and the space validates the chain.
@@ -85,14 +82,14 @@ fn bio_issuer_delegates_wrapped_key_to_pq_device() -> TestResult {
 
 #[test]
 fn owner_publishes_a_key_a_stranger_can_wrap_to() -> TestResult {
-    // The wrapper never meets the recipient: it reads the encapsulation
-    // key from a DID document service entry.
+    // The wrapper never meets the recipient. It reads the encapsulation key
+    // from a DID document service entry.
     let owner = SpaceKeyPair::generate()?;
     let published = owner.encapsulation_key_multibase()?;
     assert_eq!(pq_space::SPACE_KEY_SERVICE_TYPE, "SpaceEncapsulationKey");
 
     let space = Did::parse("did:bio:devnet:2T6zLFvMx7NJac5qQtiKTaPhMwHLkwKETWjUK1yKv4tc")?;
-    let aad = space_aad(space.as_str(), COMMAND);
+    let aad = space_aad_for(&space, &Command::parse(COMMAND)?);
     let content_key = [11u8; 32];
 
     let encapsulation_key = pq_space::decode_encapsulation_key(&published)?;

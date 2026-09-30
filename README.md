@@ -7,9 +7,10 @@
 [![license](https://img.shields.io/crates/l/pq-space)](LICENSE)
 [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/ekayana-labs/pq-space/badge)](https://scorecard.dev/viewer/?uri=github.com/ekayana-labs/pq-space)
 
-Post-quantum private space primitives for storage built on UCAN: **`did:bio`
-principals for pq-ucan**, in one chain with Ed25519 and ML-DSA-87 `did:key`,
-and **ML-KEM-1024 content key wrapping** delegated inside the UCAN itself.
+Post-quantum private space primitives for storage built on UCAN. The crate
+adds `did:bio` principals to pq-ucan, so they share one chain with Ed25519
+and ML-DSA-87 `did:key` principals. It also wraps content keys with
+ML-KEM-1024 and delegates the wrap inside the UCAN itself.
 
 Built on [pq-ucan] for UCAN 1.0 delegation, invocation and proof chain
 validation, and on [did-bio-core] for `did:bio` identities. The post-quantum
@@ -20,18 +21,23 @@ cryptography is FIPS 203 and 204 through [aws-lc-rs].
 Private space storage encrypts each blob under a fresh content key. Today
 that key is usually escrowed with a custody service, Lit Protocol or a KMS,
 whose access control rests on classical cryptography. This crate replaces
-custody with delegation that is post-quantum end to end:
+custody with delegation. The key wrap is post-quantum, and so is every hop
+signed by an ML-DSA key. A `did:bio` issuer still signs with its Ed25519
+subject key, so a chain rooted in one is classical at the root.
+
+Delegating a content key takes three steps.
 
 1. The space owner wraps the 32 byte content key to the recipient's
-   **ML-KEM-1024** encapsulation key (`WrappedContentKey::wrap`), with AAD
-   binding the wrap to one grant, `subject|command`.
-2. The wrap rides in the UCAN delegation's `meta` map under `"space/key"`,
-   signed by the issuer: a `did:bio` researcher identity, a classical
-   Ed25519 `did:key`, or an **ML-DSA-87** `did:key`.
+   ML-KEM-1024 encapsulation key with `WrappedContentKey::wrap`. The AAD
+   from `space_aad_for` binds the wrap to the delegation's subject and
+   command.
+2. The wrap rides in the UCAN delegation's `meta` map under `"space/key"`
+   and is signed by the issuer. The issuer may be a `did:bio` researcher
+   identity, a classical Ed25519 `did:key` or an ML-DSA-87 `did:key`.
 3. The recipient verifies the delegation and decapsulates the content key.
    `did:bio` and `did:key` both resolve from the identifier itself, so
-   checking a chain costs no network round trip. Capability and decryption
-   authority travel together.
+   checking a chain costs no network round trip. The same token carries
+   the capability and the key that decrypts the blob.
 
 ## Pieces
 
@@ -39,38 +45,45 @@ custody with delegation that is post-quantum end to end:
 |---|---|
 | `BioSigner` | Signs pq-ucan tokens as a `did:bio` identity with its Ed25519 subject key |
 | `BioResolver` | A pq-ucan `Resolver` for `did:bio`, deferring `did:key` to pq-ucan, for `Delegation::verify` and `Validator` |
-| `SpaceKeyPair` | A recipient's ML-KEM-1024 key pair: generate, persist, publish the encapsulation key |
+| `SpaceKeyPair` | A recipient's ML-KEM-1024 key pair, with helpers to generate it, persist it and publish its encapsulation key |
 | `WrappedContentKey` | `ML-KEM-1024 -> HKDF-SHA256 -> AES-256-GCM` wrap of a content key, with IPLD encoding and `meta` helpers |
 
-See the crate level example and
-[`tests/delegation_flow.rs`](tests/delegation_flow.rs) for the whole story:
-a researcher delegating to a device holding post-quantum keys, and the
-device exercising the grant through a validated chain.
+The crate level example and
+[`tests/delegation_flow.rs`](tests/delegation_flow.rs) show the whole flow.
+A researcher delegates to a device that holds post-quantum keys, and the
+device exercises the grant through a validated chain.
 
 ## Publishing the encapsulation key
 
 A wrapper needs the recipient's encapsulation key before it can wrap
-anything. `encode_encapsulation_key` renders it as a multibase string that
-goes in a DID document service entry typed `SpaceEncapsulationKey`, and
-`decode_encapsulation_key` reads it back, rejecting a wrong multicodec or a
+anything. `encode_encapsulation_key` renders it as a multibase string for a
+DID document service entry typed `SpaceEncapsulationKey`.
+`decode_encapsulation_key` reads it back and rejects a wrong multicodec or a
 truncated key rather than deferring the failure to encapsulation time.
 
 ## Encodings
 
-- ML-DSA-87 `did:key`: multicodec `mldsa-87-pub` (`0x1212`, registered),
-  `did:key:z…` over `0x92 0x24 ‖ pk`.
-- ML-KEM-1024 encapsulation key: multicodec `mlkem-1024-pub` (`0x120d`,
-  registered), multibase `z…` over `0x8d 0x24 ‖ pk`.
-- Varsig header for ML-DSA-87: tag `0x1212` with no config segments,
-  provisional pending inclusion in the varsig registry. It is pq-ucan's;
-  this crate adds no wire format of its own beyond the `meta` entry.
+- The ML-DSA-87 `did:key` uses the registered multicodec `mldsa-87-pub`
+  (`0x1212`). It is `did:key:z...` over `0x92 0x24 || pk`.
+- The ML-KEM-1024 encapsulation key uses the registered multicodec
+  `mlkem-1024-pub` (`0x120d`). It is multibase `z...` over
+  `0x8d 0x24 || pk`.
+- The varsig header for ML-DSA-87 is the tag `0x1212` with no config
+  segments. It stays provisional until the varsig registry includes it. The
+  header belongs to pq-ucan, and this crate adds no wire format of its own
+  beyond the `meta` entry.
 
 ## Status
 
 `BioResolver` resolves generatively, from the subject key inside the
-identifier. A registered `did:bio` may have rotated its keys since; where
-that matters, resolve the DID document through `did-bio-core` and build a
+identifier. A registered `did:bio` may have rotated its keys since then,
+and an owned subject has no key in its identifier at all. Where that
+matters, resolve the DID document through `did-bio-core` and build a
 resolver on it.
+
+pq-ucan's `ml-dsa` feature is enabled, so ML-DSA-44 and ML-DSA-65
+`did:key` principals resolve as well. The tests and examples use
+ML-DSA-87.
 
 The crate has not received an external audit, and the provisional varsig
 header means a token signed today may not verify once the registry assigns

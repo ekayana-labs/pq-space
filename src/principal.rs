@@ -2,10 +2,10 @@
 //!
 //! pq-ucan carries any DID in any position of a chain and turns an issuer
 //! into a key through its `Resolver` trait. A `did:bio` principal needs
-//! two pieces: a [`BioSigner`] that signs with the subject key and names
-//! the `did:bio` identifier as issuer, and a [`BioResolver`] that turns the
-//! identifier back into that key. Ed25519 and ML-DSA-87 `did:key`
-//! principals need nothing from this crate.
+//! two pieces. [`BioSigner`] signs with the subject key and names the
+//! `did:bio` identifier as issuer. [`BioResolver`] turns the identifier
+//! back into that key. Ed25519 and ML-DSA-87 `did:key` principals need
+//! nothing from this crate.
 
 use pq_ucan::crypto::{
     ed25519::Ed25519Keypair, Algorithm, CryptoError, PublicKey, Signature, Signer,
@@ -36,9 +36,10 @@ pub fn bio_of(did: &Did) -> Option<BioDid> {
 /// `did:key` through pq-ucan.
 ///
 /// Generative resolution answers with the key the identifier was minted
-/// from. A registered `did:bio` may have rotated since. Where that matters,
-/// resolve the DID document through `did-bio-core` and build a resolver on
-/// it.
+/// from. A registered `did:bio` may have rotated since, and an owned
+/// subject has no key in its identifier at all, so it fails to resolve.
+/// Where either matters, resolve the DID document through `did-bio-core`
+/// and build a resolver on it.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct BioResolver;
 
@@ -49,6 +50,13 @@ impl Resolver for BioResolver {
         }
         let bio = BioDid::parse(did.base())
             .map_err(|_| ResolveError::Failed("not a did:bio identifier".into()))?;
+        // An owned subject is a program derived address, so nothing about
+        // its key is in the identifier. Only its DID document knows.
+        if !bio.is_key_subject() {
+            return Err(ResolveError::Failed(
+                "owned did:bio subject has no key in its identifier".into(),
+            ));
+        }
         PublicKey::new(Algorithm::Ed25519, &bio.subject)
             .map_err(|_| ResolveError::Failed("did:bio subject is not an Ed25519 key".into()))
     }
@@ -175,6 +183,20 @@ mod tests {
         ));
         assert_eq!(bio_of(&short), None);
         assert_eq!(bio_of(&web), None);
+        Ok(())
+    }
+
+    #[test]
+    fn an_owned_subject_is_named_but_not_resolved() -> TestResult {
+        let owned = BioDid::owned(Network::Devnet, &[0x11; 32], 42);
+        assert!(!owned.is_key_subject());
+        let did = did_of(&owned)?;
+        assert_eq!(bio_of(&did), Some(owned));
+
+        let Err(ResolveError::Failed(reason)) = BioResolver.resolve(&did) else {
+            panic!("an owned subject resolved to a key");
+        };
+        assert!(reason.contains("owned"), "{reason}");
         Ok(())
     }
 }
