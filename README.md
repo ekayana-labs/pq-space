@@ -21,12 +21,16 @@ cryptography is FIPS 203 and 204 through [aws-lc-rs].
 Private space storage encrypts each blob under a fresh content key. Today
 that key is usually escrowed with a custody service, Lit Protocol or a KMS,
 whose access control rests on classical cryptography. This crate replaces
-custody with delegation that is post-quantum end to end. It works in three
-steps.
+custody with delegation. The key wrap is post-quantum, and so is every hop
+signed by an ML-DSA key. A `did:bio` issuer still signs with its Ed25519
+subject key, so a chain rooted in one is classical at the root.
+
+Delegating a content key takes three steps.
 
 1. The space owner wraps the 32 byte content key to the recipient's
-   ML-KEM-1024 encapsulation key with `WrappedContentKey::wrap`. The AAD,
-   `subject|command`, binds the wrap to one grant.
+   ML-KEM-1024 encapsulation key with `WrappedContentKey::wrap`. The AAD
+   from `space_aad_for` binds the wrap to the delegation's subject and
+   command.
 2. The wrap rides in the UCAN delegation's `meta` map under `"space/key"`
    and is signed by the issuer. The issuer may be a `did:bio` researcher
    identity, a classical Ed25519 `did:key` or an ML-DSA-87 `did:key`.
@@ -72,9 +76,14 @@ truncated key rather than deferring the failure to encapsulation time.
 ## Status
 
 `BioResolver` resolves generatively, from the subject key inside the
-identifier. A registered `did:bio` may have rotated its keys since then.
-Where that matters, resolve the DID document through `did-bio-core` and
-build a resolver on it.
+identifier. A registered `did:bio` may have rotated its keys since then,
+and an owned subject has no key in its identifier at all. Where that
+matters, resolve the DID document through `did-bio-core` and build a
+resolver on it.
+
+pq-ucan's `ml-dsa` feature is enabled, so ML-DSA-44 and ML-DSA-65
+`did:key` principals resolve as well. The tests and examples use
+ML-DSA-87.
 
 The crate has not received an external audit, and the provisional varsig
 header means a token signed today may not verify once the registry assigns
