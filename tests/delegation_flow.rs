@@ -1,6 +1,6 @@
 //! A researcher's `did:bio` identity delegates read access to a device's
 //! post-quantum `did:key`, with the blob's content key wrapped inside the
-//! same signed UCAN; the device then exercises the grant.
+//! same signed UCAN. The device then exercises the grant.
 
 use std::collections::BTreeMap;
 
@@ -85,8 +85,8 @@ fn bio_issuer_delegates_wrapped_key_to_pq_device() -> TestResult {
 
 #[test]
 fn owner_publishes_a_key_a_stranger_can_wrap_to() -> TestResult {
-    // The wrapper never meets the recipient: it reads the encapsulation
-    // key from a DID document service entry.
+    // The wrapper never meets the recipient. It reads the encapsulation key
+    // from a DID document service entry.
     let owner = SpaceKeyPair::generate()?;
     let published = owner.encapsulation_key_multibase()?;
     assert_eq!(pq_space::SPACE_KEY_SERVICE_TYPE, "SpaceEncapsulationKey");

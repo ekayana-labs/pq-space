@@ -2,10 +2,10 @@
 //!
 //! pq-ucan carries any DID in any position of a chain and turns an issuer
 //! into a key through its `Resolver` trait. A `did:bio` principal needs
-//! two pieces: a [`BioSigner`] that signs with the subject key and names
-//! the `did:bio` identifier as issuer, and a [`BioResolver`] that turns the
-//! identifier back into that key. Ed25519 and ML-DSA-87 `did:key`
-//! principals need nothing from this crate.
+//! two pieces. [`BioSigner`] signs with the subject key and names the
+//! `did:bio` identifier as issuer. [`BioResolver`] turns the identifier
+//! back into that key. Ed25519 and ML-DSA-87 `did:key` principals need
+//! nothing from this crate.
 
 use pq_ucan::crypto::{
     ed25519::Ed25519Keypair, Algorithm, CryptoError, PublicKey, Signature, Signer,

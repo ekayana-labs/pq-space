@@ -27,7 +27,8 @@ jobs:
           test "v${version}" = "${GITHUB_REF_NAME}" || { echo "tag ${GITHUB_REF_NAME} but Cargo.toml says v${version}"; exit 1; }
           echo "version=${version}" >> "$GITHUB_OUTPUT"
       - run: cargo test
-      # A tag for a version published by hand is a release note, not a publish.
+      # Skip the publish when this version is already on crates.io, for
+      # example after a manual cargo publish.
       - name: Already on crates.io?
         id: published
         run: |

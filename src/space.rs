@@ -44,7 +44,7 @@ const HKDF_INFO: &[u8] = b"pq-space/v1/content-key-wrap";
 
 /// A recipient's ML-KEM-1024 key pair (FIPS 203).
 ///
-/// The decapsulation key stays with its owner; only the encapsulation key
+/// The decapsulation key stays with its owner. Only the encapsulation key
 /// is shared.
 #[derive(Debug)]
 pub struct SpaceKeyPair {
@@ -66,8 +66,8 @@ impl SpaceKeyPair {
         Ok(SpaceKeyPair { decapsulation_key })
     }
 
-    /// The raw decapsulation key bytes. Secret, and the only thing that
-    /// opens a wrap.
+    /// The raw decapsulation key, 3168 bytes. It is secret and it is the
+    /// only thing that opens a wrap.
     pub fn decapsulation_key_bytes(&self) -> Result<Vec<u8>, Error> {
         Ok(self
             .decapsulation_key
@@ -77,7 +77,7 @@ impl SpaceKeyPair {
             .to_vec())
     }
 
-    /// The raw encapsulation key bytes, 1568 of them, for whoever wraps.
+    /// The raw encapsulation key, 1568 bytes, which a wrapper needs.
     pub fn encapsulation_key_bytes(&self) -> Result<Vec<u8>, Error> {
         Ok(self
             .decapsulation_key
@@ -142,8 +142,8 @@ pub fn encode_encapsulation_key(key: &[u8]) -> String {
 
 /// Decode what [`encode_encapsulation_key`] produced.
 ///
-/// The length check is not redundant: ML-KEM would otherwise reject a
-/// malformed key at encapsulation time, far from where it was read.
+/// The length is checked here so that a malformed key fails where it was
+/// read. ML-KEM would otherwise reject it only at encapsulation time.
 pub fn decode_encapsulation_key(multibase: &str) -> Result<Vec<u8>, Error> {
     let encoded = multibase
         .strip_prefix('z')
@@ -179,7 +179,7 @@ pub struct WrappedContentKey {
     pub kem_ciphertext: Vec<u8>,
     /// The AES-256-GCM nonce.
     pub nonce: [u8; NONCE_LEN],
-    /// The sealed key: 32 bytes of key, then the 16 byte tag.
+    /// The sealed key, 32 bytes of key followed by the 16 byte tag.
     pub sealed_key: Vec<u8>,
 }
 
@@ -292,7 +292,8 @@ impl WrappedContentKey {
     }
 }
 
-/// The conventional AAD: the delegation's subject and command.
+/// The conventional AAD, the delegation's subject and command joined by
+/// `|`.
 #[must_use]
 pub fn space_aad(subject: &str, command: &str) -> Vec<u8> {
     let mut aad = Vec::with_capacity(subject.len() + 1 + command.len());
@@ -380,8 +381,8 @@ mod tests {
         let recipient = SpaceKeyPair::generate()?;
         let published = recipient.encapsulation_key_multibase()?;
 
-        // What a wrapper does after resolving the owner's DID: read the
-        // service entry, decode, wrap.
+        // A wrapper resolves the owner's DID, reads the service entry,
+        // decodes the key and wraps to it.
         let decoded = decode_encapsulation_key(&published)?;
         assert_eq!(decoded, recipient.encapsulation_key_bytes()?);
         assert_eq!(decoded.len(), ENCAPSULATION_KEY_LEN);

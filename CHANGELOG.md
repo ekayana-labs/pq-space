@@ -10,9 +10,12 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
-- `did-bio-core` 0.1.2: `BioDid` and `Network` now come from the release that knows owned subjects,
-  so a `did:bio` principal can name a wallet-owned asset DID. Consumers must move to the same `did-bio-core` generation.
-- `pq-ucan` 0.1.1, the release with detached signing, so a space can be delegated by a key the builder never holds.
+- Moved to `did-bio-core` 0.1.2. `BioDid` and `Network` now come from the
+  release that knows owned subjects, so a `did:bio` principal can name a
+  wallet-owned asset DID. Consumers must move to the same `did-bio-core`
+  generation.
+- Moved to `pq-ucan` 0.1.1, the release with detached signing, so a space
+  can be delegated by a key the builder never holds.
 
 ## [0.1.0] - 2026-09-10
 
@@ -20,16 +23,17 @@ First release.
 
 ### Added
 
-- `BioSigner` and `BioResolver`: a `did:bio` identity as a pq-ucan signer
+- `BioSigner` and `BioResolver` make a `did:bio` identity a pq-ucan signer
   and resolver, so one chain may hold `did:bio`, Ed25519 `did:key` and
-  ML-DSA-87 `did:key` principals; `did_of` and `bio_of` convert between the
+  ML-DSA-87 `did:key` principals. `did_of` and `bio_of` convert between the
   two identifier types.
-- `SpaceKeyPair` and `WrappedContentKey`: ML-KEM-1024 key pairs and the
-  `ML-KEM-1024 -> HKDF-SHA256 -> AES-256-GCM` content key wrap, with IPLD
-  encoding and helpers for the delegation `meta` map.
-- `encode_encapsulation_key` and `decode_encapsulation_key`: the multibase
-  form of an ML-KEM-1024 encapsulation key, so a space owner can publish
-  one in a DID document service entry under `SPACE_KEY_SERVICE_TYPE`.
+- `SpaceKeyPair` and `WrappedContentKey` provide ML-KEM-1024 key pairs and
+  the `ML-KEM-1024 -> HKDF-SHA256 -> AES-256-GCM` content key wrap, with
+  IPLD encoding and helpers for the delegation `meta` map.
+- `encode_encapsulation_key` and `decode_encapsulation_key` give the
+  multibase form of an ML-KEM-1024 encapsulation key, so a space owner can
+  publish one in a DID document service entry under
+  `SPACE_KEY_SERVICE_TYPE`.
 
 [Unreleased]: https://github.com/ekayana-labs/pq-space/compare/v0.1.1...HEAD
 [0.1.1]: https://github.com/ekayana-labs/pq-space/releases/tag/v0.1.1
