@@ -13,12 +13,12 @@ exclude = [".github/"]
 
 [dependencies]
 pq-ucan = { version = "0.1.2", default-features = false, features = ["std", "ed25519", "ml-dsa"] }
-did-bio-core = { version = "0.1.2", default-features = false }
+did-bio-core = { version = "0.2", default-features = false }
 aws-lc-rs = "1.18"
 bs58 = "0.5"
 thiserror = "2"
 zeroize = "1"
 
 [dev-dependencies]
-did-bio-core = { version = "0.1.2", features = ["pda"] }
+did-bio-core = { version = "0.2", features = ["pda"] }
 testresult = "0.4"
