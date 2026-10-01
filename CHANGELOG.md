@@ -6,6 +6,15 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-10-01
+
+### Changed
+
+- Moved to `did-bio-core` 0.2. `BioDid` and `Network` come from that
+  release, so consumers must move to the same `did-bio-core` generation.
+  `Network` is non-exhaustive there, so a `match` on it needs a wildcard
+  arm.
+
 ## [0.1.2] - 2026-10-01
 
 ### Added
@@ -70,6 +79,8 @@ First release.
   publish one in a DID document service entry under
   `SPACE_KEY_SERVICE_TYPE`.
 
-[Unreleased]: https://github.com/ekayana-labs/pq-space/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/ekayana-labs/pq-space/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/ekayana-labs/pq-space/releases/tag/v0.2.0
+[0.1.2]: https://github.com/ekayana-labs/pq-space/releases/tag/v0.1.2
 [0.1.1]: https://github.com/ekayana-labs/pq-space/releases/tag/v0.1.1
 [0.1.0]: https://github.com/ekayana-labs/pq-space/releases/tag/v0.1.0
