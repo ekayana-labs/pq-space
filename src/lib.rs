@@ -49,6 +49,7 @@
 #![forbid(unsafe_code)]
 #![deny(missing_docs)]
 
+pub mod blob;
 mod error;
 pub mod principal;
 pub mod space;
@@ -56,6 +57,7 @@ pub mod space;
 pub use did_bio_core;
 pub use pq_ucan;
 
+pub use blob::{generate_content_key, open_blob, seal_blob, BLOB_CHUNK_LEN, BLOB_HEADER_LEN};
 pub use error::Error;
 pub use principal::{bio_of, did_of, BioDid, BioResolver, BioSigner, Network};
 #[allow(deprecated)]
