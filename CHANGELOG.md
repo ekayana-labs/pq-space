@@ -6,6 +6,11 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- `unwrap_key` and `decapsulation_key_bytes` return `Zeroizing` values, so
+  the copies handed to a caller are wiped when dropped.
+
 ## [0.2.0] - 2026-10-01
 
 ### Changed
