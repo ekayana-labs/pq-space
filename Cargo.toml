@@ -9,7 +9,7 @@ repository = "https://github.com/ekayana-labs/pq-space"
 readme = "README.md"
 keywords = ["ucan", "post-quantum", "ml-kem", "ml-dsa", "did"]
 categories = ["cryptography", "authentication"]
-exclude = [".github/"]
+exclude = [".github/", "fuzz/"]
 
 [dependencies]
 pq-ucan = { version = "0.1.3", default-features = false, features = ["std", "ed25519", "ml-dsa"] }

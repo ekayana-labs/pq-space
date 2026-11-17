@@ -1,0 +1,42 @@
+[package]
+name = "pq-space-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+pq-space = { path = ".." }
+
+[workspace]
+
+[[bin]]
+name = "wrapped_key"
+path = "fuzz_targets/wrapped_key.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "encapsulation_key"
+path = "fuzz_targets/encapsulation_key.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "decapsulation_key"
+path = "fuzz_targets/decapsulation_key.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "blob"
+path = "fuzz_targets/blob.rs"
+test = false
+doc = false
+bench = false
