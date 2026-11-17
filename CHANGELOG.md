@@ -10,9 +10,24 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 - `space_aad_to` builds an AAD that also names the audience, so a wrap
   copied into a delegation for someone else does not open.
+- `seal_blob` and `open_blob` encrypt a blob under a content key in
+  64 KiB AES-256-GCM chunks with a key commitment, and
+  `generate_content_key` makes the key.
+- `WrappedContentKey::rewrap` moves a content key to another recipient.
+- Fuzz targets under `fuzz/`.
 
 ### Changed
 
+- `wrap` derives its key from the shared secret, the recipient's
+  encapsulation key and the ML-KEM ciphertext, and records
+  `WRAP_ALGORITHM`, now `ML-KEM-1024+HKDF-SHA256+A256GCM/v2`. Wraps in the
+  first format still open. Releases before this one cannot read the new
+  format.
+- `WrappedContentKey` keeps its fields private behind `algorithm`,
+  `kem_ciphertext`, `nonce` and `sealed_key`.
+- `from_meta` returns `Result<Option<_>, _>`.
+- `encapsulation_key_bytes` returns `&[u8]` and
+  `encapsulation_key_multibase` returns `String`. Neither can fail.
 - `unwrap_key` and `decapsulation_key_bytes` return `Zeroizing` values, so
   the copies handed to a caller are wiped when dropped.
 
