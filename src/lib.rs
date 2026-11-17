@@ -41,7 +41,7 @@
 //!
 //! delegation.verify(&BioResolver)?;
 //! let carried = WrappedContentKey::from_meta(delegation.meta()).expect("attached")?;
-//! assert_eq!(carried.unwrap_key(&device_kem, &aad)?, [42; 32]);
+//! assert_eq!(*carried.unwrap_key(&device_kem, &aad)?, [42; 32]);
 //! # Ok(())
 //! # }
 //! ```

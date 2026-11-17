@@ -57,7 +57,7 @@ fn bio_issuer_delegates_wrapped_key_to_pq_device() -> TestResult {
     assert!(received.envelope().verify(stranger.public_key()).is_err());
 
     let carried = WrappedContentKey::from_meta(received.meta()).expect("wrapped key attached")?;
-    assert_eq!(carried.unwrap_key(&device_kem, &aad)?, content_key);
+    assert_eq!(*carried.unwrap_key(&device_kem, &aad)?, content_key);
 
     // A copy pasted into a grant for another command does not open.
     let other_aad = space_aad_for(&space, &Command::parse("/space/blob/list")?);
@@ -95,7 +95,7 @@ fn owner_publishes_a_key_a_stranger_can_wrap_to() -> TestResult {
     let encapsulation_key = pq_space::decode_encapsulation_key(&published)?;
     let wrapped = WrappedContentKey::wrap(&encapsulation_key, &content_key, &aad)?;
 
-    assert_eq!(wrapped.unwrap_key(&owner, &aad)?, content_key);
+    assert_eq!(*wrapped.unwrap_key(&owner, &aad)?, content_key);
     Ok(())
 }
 

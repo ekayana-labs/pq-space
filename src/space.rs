@@ -126,14 +126,15 @@ impl SpaceKeyPair {
     }
 
     /// The raw decapsulation key, 3168 bytes. It is secret and it is the
-    /// only thing that opens a wrap.
-    pub fn decapsulation_key_bytes(&self) -> Result<Vec<u8>, Error> {
-        Ok(self
-            .decapsulation_key
-            .key_bytes()
-            .map_err(|_| Error::Crypto)?
-            .as_ref()
-            .to_vec())
+    /// only thing that opens a wrap, so the copy wipes itself when dropped.
+    pub fn decapsulation_key_bytes(&self) -> Result<Zeroizing<Vec<u8>>, Error> {
+        Ok(Zeroizing::new(
+            self.decapsulation_key
+                .key_bytes()
+                .map_err(|_| Error::Crypto)?
+                .as_ref()
+                .to_vec(),
+        ))
     }
 
     /// The raw encapsulation key, 1568 bytes, which a wrapper needs.
@@ -237,9 +238,11 @@ impl WrappedContentKey {
         let aead_key =
             RandomizedNonceKey::new(&AES_256_GCM, &wrap_key[..]).map_err(|_| Error::Crypto)?;
 
-        let mut sealed_key = content_key.to_vec();
+        // The buffer holds the key in the clear until it is sealed, so it is
+        // wiped even when sealing fails.
+        let mut sealed_key = Zeroizing::new(content_key.to_vec());
         let nonce = aead_key
-            .seal_in_place_append_tag(Aad::from(aad), &mut sealed_key)
+            .seal_in_place_append_tag(Aad::from(aad), &mut *sealed_key)
             .map_err(|_| Error::Crypto)?;
 
         let mut nonce_bytes = [0u8; NONCE_LEN];
@@ -248,16 +251,17 @@ impl WrappedContentKey {
         Ok(WrappedContentKey {
             kem_ciphertext: ciphertext.as_ref().to_vec(),
             nonce: nonce_bytes,
-            sealed_key,
+            sealed_key: sealed_key.to_vec(),
         })
     }
 
-    /// Recover the content key, given the same `aad` used to wrap.
+    /// Recover the content key, given the same `aad` used to wrap. The key
+    /// wipes itself when dropped.
     pub fn unwrap_key(
         &self,
         recipient: &SpaceKeyPair,
         aad: &[u8],
-    ) -> Result<[u8; CONTENT_KEY_LEN], Error> {
+    ) -> Result<Zeroizing<[u8; CONTENT_KEY_LEN]>, Error> {
         let shared_secret = recipient
             .decapsulation_key
             .decapsulate(kem::Ciphertext::from(self.kem_ciphertext.as_slice()))
@@ -273,7 +277,12 @@ impl WrappedContentKey {
             .open_in_place(nonce, Aad::from(aad), &mut buffer[..])
             .map_err(|_| Error::Crypto)?;
 
-        <[u8; CONTENT_KEY_LEN]>::try_from(&*plaintext).map_err(|_| Error::Crypto)
+        let mut key = Zeroizing::new([0u8; CONTENT_KEY_LEN]);
+        if plaintext.len() != CONTENT_KEY_LEN {
+            return Err(Error::Crypto);
+        }
+        key.copy_from_slice(plaintext);
+        Ok(key)
     }
 
     /// Encode as IPLD for embedding in a delegation's `meta` map.
@@ -376,7 +385,7 @@ mod tests {
         assert_eq!(wrapped.sealed_key.len(), SEALED_KEY_LEN);
 
         let recovered = wrapped.unwrap_key(&recipient, &aad)?;
-        assert_eq!(recovered, content_key);
+        assert_eq!(*recovered, content_key);
         Ok(())
     }
 
@@ -419,7 +428,7 @@ mod tests {
 
         let restored =
             SpaceKeyPair::from_decapsulation_key_bytes(&recipient.decapsulation_key_bytes()?)?;
-        assert_eq!(wrapped.unwrap_key(&restored, b"")?, content_key);
+        assert_eq!(*wrapped.unwrap_key(&restored, b"")?, content_key);
 
         // The restored pair gives back the same keys.
         assert_eq!(
@@ -560,7 +569,7 @@ mod tests {
 
         let wrapped = WrappedContentKey::wrap(&decoded, &[9u8; CONTENT_KEY_LEN], b"aad")?;
         assert_eq!(
-            wrapped.unwrap_key(&recipient, b"aad")?,
+            *wrapped.unwrap_key(&recipient, b"aad")?,
             [9u8; CONTENT_KEY_LEN]
         );
         Ok(())
