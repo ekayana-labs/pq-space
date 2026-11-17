@@ -58,8 +58,10 @@ pub use pq_ucan;
 
 pub use error::Error;
 pub use principal::{bio_of, did_of, BioDid, BioResolver, BioSigner, Network};
+#[allow(deprecated)]
+pub use space::space_aad;
 pub use space::{
-    decode_encapsulation_key, encode_encapsulation_key, space_aad, space_aad_for, SpaceKeyPair,
+    decode_encapsulation_key, encode_encapsulation_key, space_aad_for, space_aad_to, SpaceKeyPair,
     WrappedContentKey, CONTENT_KEY_LEN, DECAPSULATION_KEY_LEN, ENCAPSULATION_KEY_LEN,
     KEM_CIPHERTEXT_LEN, META_KEY, ML_KEM_1024_MULTICODEC, SEALED_KEY_LEN, SPACE_KEY_SERVICE_TYPE,
     WRAP_ALGORITHM,

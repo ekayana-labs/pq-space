@@ -30,7 +30,7 @@ Delegating a content key takes three steps.
 1. The space owner wraps the 32 byte content key to the recipient's
    ML-KEM-1024 encapsulation key with `WrappedContentKey::wrap`. The AAD
    from `space_aad_for` binds the wrap to the delegation's subject and
-   command.
+   command, and `space_aad_to` binds its audience as well.
 2. The wrap rides in the UCAN delegation's `meta` map under `"space/key"`
    and is signed by the issuer. The issuer may be a `did:bio` researcher
    identity, a classical Ed25519 `did:key` or an ML-DSA-87 `did:key`.

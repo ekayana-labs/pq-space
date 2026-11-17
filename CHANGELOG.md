@@ -6,10 +6,19 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- `space_aad_to` builds an AAD that also names the audience, so a wrap
+  copied into a delegation for someone else does not open.
+
 ### Changed
 
 - `unwrap_key` and `decapsulation_key_bytes` return `Zeroizing` values, so
   the copies handed to a caller are wiped when dropped.
+
+### Deprecated
+
+- `space_aad`. Use `space_aad_for`, which cannot be ambiguous.
 
 ## [0.2.0] - 2026-10-01
 
