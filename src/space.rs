@@ -343,18 +343,19 @@ impl WrappedContentKey {
     }
 }
 
+fn join(parts: &[&str]) -> Vec<u8> {
+    parts.join("|").into_bytes()
+}
+
 /// The conventional AAD, the delegation's subject and command joined by
 /// `|`.
 ///
-/// Prefer [`space_aad_for`]. With plain strings, `("a|b", "c")` and
-/// `("a", "b|c")` give the same AAD.
+/// With plain strings, `("a|b", "c")` and `("a", "b|c")` give the same
+/// AAD.
+#[deprecated(note = "use `space_aad_for`, which takes a typed subject and cannot be ambiguous")]
 #[must_use]
 pub fn space_aad(subject: &str, command: &str) -> Vec<u8> {
-    let mut aad = Vec::with_capacity(subject.len() + 1 + command.len());
-    aad.extend_from_slice(subject.as_bytes());
-    aad.push(b'|');
-    aad.extend_from_slice(command.as_bytes());
-    aad
+    join(&[subject, command])
 }
 
 /// The conventional AAD for a typed subject and command.
@@ -365,7 +366,31 @@ pub fn space_aad(subject: &str, command: &str) -> Vec<u8> {
 /// AAD.
 #[must_use]
 pub fn space_aad_for(subject: &Did, command: &Command) -> Vec<u8> {
-    space_aad(subject.base(), command.as_str())
+    join(&[subject.base(), command.as_str()])
+}
+
+/// The AAD for a wrap meant for one audience, the subject, the audience
+/// and the command joined by `|`.
+///
+/// [`space_aad_for`] leaves the audience out, so a wrap opens under any
+/// delegation for the same subject and command. With the audience bound,
+/// a wrap copied into a delegation addressed to someone else does not
+/// open. A DID cannot contain `|`, so the three parts decode one way.
+///
+/// ```
+/// use pq_space::{space_aad_to, pq_ucan::{command::Command, did::Did}};
+///
+/// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+/// let space = Did::parse("did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK")?;
+/// let device = Did::parse("did:key:z6MkiTBz1ymuepAQ4HEHYSF1H8quG5GLVVQR3djdX3mDooWp")?;
+/// let aad = space_aad_to(&space, &device, &Command::parse("/space/blob/get")?);
+/// assert_eq!(aad.iter().filter(|byte| **byte == b'|').count(), 2);
+/// # Ok(())
+/// # }
+/// ```
+#[must_use]
+pub fn space_aad_to(subject: &Did, audience: &Did, command: &Command) -> Vec<u8> {
+    join(&[subject.base(), audience.base(), command.as_str()])
 }
 
 #[cfg(test)]
@@ -377,7 +402,7 @@ mod tests {
     fn wrap_unwrap_round_trip() -> TestResult {
         let recipient = SpaceKeyPair::generate()?;
         let content_key = [42u8; CONTENT_KEY_LEN];
-        let aad = space_aad("did:bio:devnet:subject", "/space/blob/get");
+        let aad = b"did:bio:devnet:subject|/space/blob/get".to_vec();
 
         let wrapped =
             WrappedContentKey::wrap(&recipient.encapsulation_key_bytes()?, &content_key, &aad)?;
@@ -394,7 +419,7 @@ mod tests {
         let recipient = SpaceKeyPair::generate()?;
         let other = SpaceKeyPair::generate()?;
         let content_key = [7u8; CONTENT_KEY_LEN];
-        let aad = space_aad("did:bio:devnet:subject", "/space/blob/get");
+        let aad = b"did:bio:devnet:subject|/space/blob/get".to_vec();
 
         let wrapped =
             WrappedContentKey::wrap(&recipient.encapsulation_key_bytes()?, &content_key, &aad)?;
@@ -635,6 +660,36 @@ mod tests {
     }
 
     #[test]
+    fn a_wrap_bound_to_an_audience_opens_for_no_other() -> TestResult {
+        let recipient = SpaceKeyPair::generate()?;
+        let space = Did::parse("did:bio:devnet:8SFqwqnq4whPhs8icwHA2hQg3hUoN1qrCLK1SBx3WKwe")?;
+        let device = Did::parse("did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK")?;
+        let other = Did::parse("did:key:z6MkiTBz1ymuepAQ4HEHYSF1H8quG5GLVVQR3djdX3mDooWp")?;
+        let command = Command::parse("/space/blob/get")?;
+
+        let aad = space_aad_to(&space, &device, &command);
+        assert_eq!(
+            aad,
+            b"did:bio:devnet:8SFqwqnq4whPhs8icwHA2hQg3hUoN1qrCLK1SBx3WKwe|did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK|/space/blob/get"
+        );
+
+        let content_key = [9u8; CONTENT_KEY_LEN];
+        let wrapped =
+            WrappedContentKey::wrap(&recipient.encapsulation_key_bytes()?, &content_key, &aad)?;
+        assert_eq!(*wrapped.unwrap_key(&recipient, &aad)?, content_key);
+        assert_eq!(
+            wrapped.unwrap_key(&recipient, &space_aad_to(&space, &other, &command)),
+            Err(Error::Crypto)
+        );
+        assert_eq!(
+            wrapped.unwrap_key(&recipient, &space_aad_for(&space, &command)),
+            Err(Error::Crypto)
+        );
+        Ok(())
+    }
+
+    #[test]
+    #[allow(deprecated)]
     fn typed_aad_matches_the_string_form_and_drops_the_fragment() -> TestResult {
         let space = Did::parse("did:bio:devnet:8SFqwqnq4whPhs8icwHA2hQg3hUoN1qrCLK1SBx3WKwe")?;
         let command = Command::parse("/space/blob/get")?;
