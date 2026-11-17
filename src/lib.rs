@@ -29,7 +29,7 @@
 //! let command = Command::parse("/space/blob/get")?;
 //! let aad = space_aad_for(&space, &command);
 //! let wrapped =
-//!     WrappedContentKey::wrap(&device_kem.encapsulation_key_bytes()?, &[42; 32], &aad)?;
+//!     WrappedContentKey::wrap(device_kem.encapsulation_key_bytes(), &[42; 32], &aad)?;
 //! let mut meta = std::collections::BTreeMap::new();
 //! wrapped.attach_to_meta(&mut meta);
 //!
@@ -40,7 +40,7 @@
 //!     .sign(&researcher)?;
 //!
 //! delegation.verify(&BioResolver)?;
-//! let carried = WrappedContentKey::from_meta(delegation.meta()).expect("attached")?;
+//! let carried = WrappedContentKey::from_meta(delegation.meta())?.expect("attached");
 //! assert_eq!(*carried.unwrap_key(&device_kem, &aad)?, [42; 32]);
 //! # Ok(())
 //! # }
@@ -64,5 +64,5 @@ pub use space::{
     decode_encapsulation_key, encode_encapsulation_key, space_aad_for, space_aad_to, SpaceKeyPair,
     WrappedContentKey, CONTENT_KEY_LEN, DECAPSULATION_KEY_LEN, ENCAPSULATION_KEY_LEN,
     KEM_CIPHERTEXT_LEN, META_KEY, ML_KEM_1024_MULTICODEC, SEALED_KEY_LEN, SPACE_KEY_SERVICE_TYPE,
-    WRAP_ALGORITHM,
+    WRAP_ALGORITHM, WRAP_ALGORITHM_V1,
 };
