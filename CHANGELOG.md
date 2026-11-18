@@ -6,6 +6,8 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-11-18
+
 ### Added
 
 - `space_aad_to` builds an AAD that also names the audience, so a wrap
