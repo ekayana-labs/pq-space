@@ -9,6 +9,13 @@ cargo clippy --all-targets -- -D warnings
 cargo doc --no-deps
 ```
 
+The fuzz targets in `fuzz/` need nightly and `cargo-fuzz`.
+
+```console
+cd fuzz
+cargo +nightly fuzz run wrapped_key corpus/wrapped_key seeds/wrapped_key
+```
+
 `pq-ucan`'s `ml-dsa` feature and this crate's ML-KEM both build `aws-lc-rs`,
 which needs a C compiler and CMake.
 

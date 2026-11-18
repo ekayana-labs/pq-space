@@ -8,7 +8,9 @@
 //!
 //! The wrap is ML-KEM-1024 encapsulation, HKDF-SHA256 under a domain
 //! separating label, then AES-256-GCM. Its AAD binds the result to a
-//! subject and a command.
+//! subject and a command. The derived key also depends on the recipient's
+//! encapsulation key and on the ML-KEM ciphertext, so a wrap is tied to
+//! the key pair and the encapsulation it was made with.
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -45,8 +47,12 @@ pub const SEALED_KEY_LEN: usize = CONTENT_KEY_LEN + 16;
 /// (`mlkem-1024-pub`).
 pub const ML_KEM_1024_MULTICODEC: u64 = 0x120d;
 
-/// Algorithm identifier recorded in the wire format.
-pub const WRAP_ALGORITHM: &str = "ML-KEM-1024+HKDF-SHA256+A256GCM";
+/// Algorithm identifier recorded in the wire format by [`WrappedContentKey::wrap`].
+pub const WRAP_ALGORITHM: &str = "ML-KEM-1024+HKDF-SHA256+A256GCM/v2";
+
+/// Algorithm identifier of the first wrap format. Its key derivation uses
+/// the shared secret alone. Such wraps still open and are no longer made.
+pub const WRAP_ALGORITHM_V1: &str = "ML-KEM-1024+HKDF-SHA256+A256GCM";
 
 /// The `meta` key under which a wrapped content key rides in a UCAN
 /// delegation.
@@ -56,7 +62,23 @@ pub const META_KEY: &str = "space/key";
 /// encapsulation key.
 pub const SPACE_KEY_SERVICE_TYPE: &str = "SpaceEncapsulationKey";
 
-const HKDF_INFO: &[u8] = b"pq-space/v1/content-key-wrap";
+const HKDF_INFO_V1: &[u8] = b"pq-space/v1/content-key-wrap";
+const HKDF_INFO_V2: &[u8] = b"pq-space/v2/content-key-wrap";
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Format {
+    V1,
+    V2,
+}
+
+impl Format {
+    fn algorithm(self) -> &'static str {
+        match self {
+            Format::V1 => WRAP_ALGORITHM_V1,
+            Format::V2 => WRAP_ALGORITHM,
+        }
+    }
+}
 
 // FIPS 203 lays a decapsulation key out as dk_pke || ek || H(ek) || z,
 // where H is SHA3-256 and dk_pke is 1536 bytes for ML-KEM-1024. aws-lc-rs
@@ -126,25 +148,28 @@ impl SpaceKeyPair {
     }
 
     /// The raw decapsulation key, 3168 bytes. It is secret and it is the
-    /// only thing that opens a wrap.
-    pub fn decapsulation_key_bytes(&self) -> Result<Vec<u8>, Error> {
-        Ok(self
-            .decapsulation_key
-            .key_bytes()
-            .map_err(|_| Error::Crypto)?
-            .as_ref()
-            .to_vec())
+    /// only thing that opens a wrap, so the copy wipes itself when dropped.
+    pub fn decapsulation_key_bytes(&self) -> Result<Zeroizing<Vec<u8>>, Error> {
+        Ok(Zeroizing::new(
+            self.decapsulation_key
+                .key_bytes()
+                .map_err(|_| Error::Crypto)?
+                .as_ref()
+                .to_vec(),
+        ))
     }
 
     /// The raw encapsulation key, 1568 bytes, which a wrapper needs.
-    pub fn encapsulation_key_bytes(&self) -> Result<Vec<u8>, Error> {
-        Ok(self.encapsulation_key.clone())
+    #[must_use]
+    pub fn encapsulation_key_bytes(&self) -> &[u8] {
+        &self.encapsulation_key
     }
 
     /// The encapsulation key in the form a DID document carries under
     /// [`SPACE_KEY_SERVICE_TYPE`].
-    pub fn encapsulation_key_multibase(&self) -> Result<String, Error> {
-        Ok(encode_encapsulation_key(&self.encapsulation_key))
+    #[must_use]
+    pub fn encapsulation_key_multibase(&self) -> String {
+        encode_encapsulation_key(&self.encapsulation_key)
     }
 }
 
@@ -191,11 +216,27 @@ pub fn decode_encapsulation_key(multibase: &str) -> Result<Vec<u8>, Error> {
     Ok(key.to_vec())
 }
 
-fn derive_wrap_key(shared_secret: &[u8]) -> Result<Zeroizing<[u8; 32]>, Error> {
+// The second format puts the encapsulation key and the ciphertext into
+// the derivation. ML-KEM alone does not bind its shared secret to them
+// when a decapsulation key is stored expanded, as it is here (Cremers,
+// Dax and Medinger, ePrint 2023/1933; Schmieg, ePrint 2024/523). Both
+// hashes have a fixed length, so the info string decodes one way.
+fn derive_wrap_key(
+    format: Format,
+    shared_secret: &[u8],
+    encapsulation_key: &[u8],
+    kem_ciphertext: &[u8],
+) -> Result<Zeroizing<[u8; 32]>, Error> {
     let prk = hkdf::Salt::new(hkdf::HKDF_SHA256, &[]).extract(shared_secret);
-    let okm = prk
-        .expand(&[HKDF_INFO], &AES_256_GCM)
-        .map_err(|_| Error::Crypto)?;
+    let key_hash = digest::digest(&digest::SHA256, encapsulation_key);
+    let ciphertext_hash = digest::digest(&digest::SHA256, kem_ciphertext);
+    let v1: [&[u8]; 1] = [HKDF_INFO_V1];
+    let v2: [&[u8]; 3] = [HKDF_INFO_V2, key_hash.as_ref(), ciphertext_hash.as_ref()];
+    let info: &[&[u8]] = match format {
+        Format::V1 => &v1,
+        Format::V2 => &v2,
+    };
+    let okm = prk.expand(info, &AES_256_GCM).map_err(|_| Error::Crypto)?;
     let mut key = Zeroizing::new([0u8; 32]);
     okm.fill(&mut key[..]).map_err(|_| Error::Crypto)?;
     Ok(key)
@@ -204,15 +245,38 @@ fn derive_wrap_key(shared_secret: &[u8]) -> Result<Zeroizing<[u8; 32]>, Error> {
 /// A content key wrapped to one recipient's ML-KEM-1024 key.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WrappedContentKey {
-    /// The ML-KEM-1024 ciphertext, 1568 bytes.
-    pub kem_ciphertext: Vec<u8>,
-    /// The AES-256-GCM nonce.
-    pub nonce: [u8; NONCE_LEN],
-    /// The sealed key, 32 bytes of key followed by the 16 byte tag.
-    pub sealed_key: Vec<u8>,
+    format: Format,
+    kem_ciphertext: Vec<u8>,
+    nonce: [u8; NONCE_LEN],
+    sealed_key: Vec<u8>,
 }
 
 impl WrappedContentKey {
+    /// The algorithm identifier this wrap carries, [`WRAP_ALGORITHM`] or
+    /// [`WRAP_ALGORITHM_V1`].
+    #[must_use]
+    pub fn algorithm(&self) -> &'static str {
+        self.format.algorithm()
+    }
+
+    /// The ML-KEM-1024 ciphertext, 1568 bytes.
+    #[must_use]
+    pub fn kem_ciphertext(&self) -> &[u8] {
+        &self.kem_ciphertext
+    }
+
+    /// The AES-256-GCM nonce.
+    #[must_use]
+    pub fn nonce(&self) -> &[u8; NONCE_LEN] {
+        &self.nonce
+    }
+
+    /// The sealed key, 32 bytes of key followed by the 16 byte tag.
+    #[must_use]
+    pub fn sealed_key(&self) -> &[u8] {
+        &self.sealed_key
+    }
+
     /// Wrap `content_key` to the recipient's encapsulation key.
     ///
     /// `aad` must be presented unchanged when unwrapping. Bind at least
@@ -233,37 +297,51 @@ impl WrappedContentKey {
         let (ciphertext, shared_secret) =
             encapsulation_key.encapsulate().map_err(|_| Error::Crypto)?;
 
-        let wrap_key = derive_wrap_key(shared_secret.as_ref())?;
+        let wrap_key = derive_wrap_key(
+            Format::V2,
+            shared_secret.as_ref(),
+            recipient_encapsulation_key,
+            ciphertext.as_ref(),
+        )?;
         let aead_key =
             RandomizedNonceKey::new(&AES_256_GCM, &wrap_key[..]).map_err(|_| Error::Crypto)?;
 
-        let mut sealed_key = content_key.to_vec();
+        // The buffer holds the key in the clear until it is sealed, so it is
+        // wiped even when sealing fails.
+        let mut sealed_key = Zeroizing::new(content_key.to_vec());
         let nonce = aead_key
-            .seal_in_place_append_tag(Aad::from(aad), &mut sealed_key)
+            .seal_in_place_append_tag(Aad::from(aad), &mut *sealed_key)
             .map_err(|_| Error::Crypto)?;
 
         let mut nonce_bytes = [0u8; NONCE_LEN];
         nonce_bytes.copy_from_slice(nonce.as_ref());
 
         Ok(WrappedContentKey {
+            format: Format::V2,
             kem_ciphertext: ciphertext.as_ref().to_vec(),
             nonce: nonce_bytes,
-            sealed_key,
+            sealed_key: sealed_key.to_vec(),
         })
     }
 
-    /// Recover the content key, given the same `aad` used to wrap.
+    /// Recover the content key, given the same `aad` used to wrap. The key
+    /// wipes itself when dropped.
     pub fn unwrap_key(
         &self,
         recipient: &SpaceKeyPair,
         aad: &[u8],
-    ) -> Result<[u8; CONTENT_KEY_LEN], Error> {
+    ) -> Result<Zeroizing<[u8; CONTENT_KEY_LEN]>, Error> {
         let shared_secret = recipient
             .decapsulation_key
             .decapsulate(kem::Ciphertext::from(self.kem_ciphertext.as_slice()))
             .map_err(|_| Error::Crypto)?;
 
-        let wrap_key = derive_wrap_key(shared_secret.as_ref())?;
+        let wrap_key = derive_wrap_key(
+            self.format,
+            shared_secret.as_ref(),
+            &recipient.encapsulation_key,
+            &self.kem_ciphertext,
+        )?;
         let aead_key =
             RandomizedNonceKey::new(&AES_256_GCM, &wrap_key[..]).map_err(|_| Error::Crypto)?;
 
@@ -273,14 +351,36 @@ impl WrappedContentKey {
             .open_in_place(nonce, Aad::from(aad), &mut buffer[..])
             .map_err(|_| Error::Crypto)?;
 
-        <[u8; CONTENT_KEY_LEN]>::try_from(&*plaintext).map_err(|_| Error::Crypto)
+        let mut key = Zeroizing::new([0u8; CONTENT_KEY_LEN]);
+        if plaintext.len() != CONTENT_KEY_LEN {
+            return Err(Error::Crypto);
+        }
+        key.copy_from_slice(plaintext);
+        Ok(key)
+    }
+
+    /// Open this wrap and wrap the same content key to another recipient,
+    /// as an owner does when sharing a blob onward or moving to a new key
+    /// pair. The content key never leaves this call.
+    pub fn rewrap(
+        &self,
+        recipient: &SpaceKeyPair,
+        aad: &[u8],
+        new_recipient_encapsulation_key: &[u8],
+        new_aad: &[u8],
+    ) -> Result<Self, Error> {
+        let content_key = self.unwrap_key(recipient, aad)?;
+        Self::wrap(new_recipient_encapsulation_key, &content_key, new_aad)
     }
 
     /// Encode as IPLD for embedding in a delegation's `meta` map.
     #[must_use]
     pub fn to_ipld(&self) -> Ipld {
         let mut map = BTreeMap::new();
-        map.insert("alg".to_string(), Ipld::String(WRAP_ALGORITHM.to_string()));
+        map.insert(
+            "alg".to_string(),
+            Ipld::String(self.algorithm().to_string()),
+        );
         map.insert("ct".to_string(), Ipld::Bytes(self.kem_ciphertext.clone()));
         map.insert("iv".to_string(), Ipld::Bytes(self.nonce.to_vec()));
         map.insert("key".to_string(), Ipld::Bytes(self.sealed_key.clone()));
@@ -295,10 +395,11 @@ impl WrappedContentKey {
         let Ipld::Map(map) = ipld else {
             return Err(Error::Encoding("wrapped key must be a map"));
         };
-        match map.get("alg") {
-            Some(Ipld::String(alg)) if alg == WRAP_ALGORITHM => {}
+        let format = match map.get("alg") {
+            Some(Ipld::String(alg)) if alg == WRAP_ALGORITHM => Format::V2,
+            Some(Ipld::String(alg)) if alg == WRAP_ALGORITHM_V1 => Format::V1,
             _ => return Err(Error::Encoding("unsupported wrap algorithm")),
-        }
+        };
         let Some(Ipld::Bytes(ciphertext)) = map.get("ct") else {
             return Err(Error::Encoding("missing `ct` bytes"));
         };
@@ -317,6 +418,7 @@ impl WrappedContentKey {
             return Err(Error::Encoding("`key` must be 48 bytes"));
         }
         Ok(WrappedContentKey {
+            format,
             kem_ciphertext: ciphertext.clone(),
             nonce,
             sealed_key: sealed_key.clone(),
@@ -328,24 +430,26 @@ impl WrappedContentKey {
         meta.insert(META_KEY.to_string(), self.to_ipld());
     }
 
-    /// Extract from a delegation `meta` map, if present.
-    pub fn from_meta(meta: &BTreeMap<String, Ipld>) -> Option<Result<Self, Error>> {
-        meta.get(META_KEY).map(Self::from_ipld)
+    /// Extract from a delegation `meta` map. `Ok(None)` means the map
+    /// carries no wrapped key.
+    pub fn from_meta(meta: &BTreeMap<String, Ipld>) -> Result<Option<Self>, Error> {
+        meta.get(META_KEY).map(Self::from_ipld).transpose()
     }
+}
+
+fn join(parts: &[&str]) -> Vec<u8> {
+    parts.join("|").into_bytes()
 }
 
 /// The conventional AAD, the delegation's subject and command joined by
 /// `|`.
 ///
-/// Prefer [`space_aad_for`]. With plain strings, `("a|b", "c")` and
-/// `("a", "b|c")` give the same AAD.
+/// With plain strings, `("a|b", "c")` and `("a", "b|c")` give the same
+/// AAD.
+#[deprecated(note = "use `space_aad_for`, which takes a typed subject and cannot be ambiguous")]
 #[must_use]
 pub fn space_aad(subject: &str, command: &str) -> Vec<u8> {
-    let mut aad = Vec::with_capacity(subject.len() + 1 + command.len());
-    aad.extend_from_slice(subject.as_bytes());
-    aad.push(b'|');
-    aad.extend_from_slice(command.as_bytes());
-    aad
+    join(&[subject, command])
 }
 
 /// The conventional AAD for a typed subject and command.
@@ -356,7 +460,31 @@ pub fn space_aad(subject: &str, command: &str) -> Vec<u8> {
 /// AAD.
 #[must_use]
 pub fn space_aad_for(subject: &Did, command: &Command) -> Vec<u8> {
-    space_aad(subject.base(), command.as_str())
+    join(&[subject.base(), command.as_str()])
+}
+
+/// The AAD for a wrap meant for one audience, the subject, the audience
+/// and the command joined by `|`.
+///
+/// [`space_aad_for`] leaves the audience out, so a wrap opens under any
+/// delegation for the same subject and command. With the audience bound,
+/// a wrap copied into a delegation addressed to someone else does not
+/// open. A DID cannot contain `|`, so the three parts decode one way.
+///
+/// ```
+/// use pq_space::{space_aad_to, pq_ucan::{command::Command, did::Did}};
+///
+/// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+/// let space = Did::parse("did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK")?;
+/// let device = Did::parse("did:key:z6MkiTBz1ymuepAQ4HEHYSF1H8quG5GLVVQR3djdX3mDooWp")?;
+/// let aad = space_aad_to(&space, &device, &Command::parse("/space/blob/get")?);
+/// assert_eq!(aad.iter().filter(|byte| **byte == b'|').count(), 2);
+/// # Ok(())
+/// # }
+/// ```
+#[must_use]
+pub fn space_aad_to(subject: &Did, audience: &Did, command: &Command) -> Vec<u8> {
+    join(&[subject.base(), audience.base(), command.as_str()])
 }
 
 #[cfg(test)]
@@ -368,15 +496,15 @@ mod tests {
     fn wrap_unwrap_round_trip() -> TestResult {
         let recipient = SpaceKeyPair::generate()?;
         let content_key = [42u8; CONTENT_KEY_LEN];
-        let aad = space_aad("did:bio:devnet:subject", "/space/blob/get");
+        let aad = b"did:bio:devnet:subject|/space/blob/get".to_vec();
 
         let wrapped =
-            WrappedContentKey::wrap(&recipient.encapsulation_key_bytes()?, &content_key, &aad)?;
+            WrappedContentKey::wrap(recipient.encapsulation_key_bytes(), &content_key, &aad)?;
         assert_eq!(wrapped.kem_ciphertext.len(), KEM_CIPHERTEXT_LEN);
         assert_eq!(wrapped.sealed_key.len(), SEALED_KEY_LEN);
 
         let recovered = wrapped.unwrap_key(&recipient, &aad)?;
-        assert_eq!(recovered, content_key);
+        assert_eq!(*recovered, content_key);
         Ok(())
     }
 
@@ -385,10 +513,10 @@ mod tests {
         let recipient = SpaceKeyPair::generate()?;
         let other = SpaceKeyPair::generate()?;
         let content_key = [7u8; CONTENT_KEY_LEN];
-        let aad = space_aad("did:bio:devnet:subject", "/space/blob/get");
+        let aad = b"did:bio:devnet:subject|/space/blob/get".to_vec();
 
         let wrapped =
-            WrappedContentKey::wrap(&recipient.encapsulation_key_bytes()?, &content_key, &aad)?;
+            WrappedContentKey::wrap(recipient.encapsulation_key_bytes(), &content_key, &aad)?;
 
         assert_eq!(
             wrapped.unwrap_key(&recipient, b"different aad"),
@@ -399,6 +527,60 @@ mod tests {
         let mut tampered = wrapped;
         tampered.sealed_key[0] ^= 1;
         assert_eq!(tampered.unwrap_key(&recipient, &aad), Err(Error::Crypto));
+        Ok(())
+    }
+
+    #[test]
+    fn a_wrap_does_not_open_under_the_other_format() -> TestResult {
+        let recipient = SpaceKeyPair::generate()?;
+        let content_key = [4u8; CONTENT_KEY_LEN];
+        let wrapped =
+            WrappedContentKey::wrap(recipient.encapsulation_key_bytes(), &content_key, b"aad")?;
+        assert_eq!(wrapped.algorithm(), WRAP_ALGORITHM);
+
+        // Relabelled as the first format, the key is derived without the
+        // encapsulation key and the ciphertext, so it is a different key.
+        let Ipld::Map(mut map) = wrapped.to_ipld() else {
+            unreachable!()
+        };
+        map.insert("alg".into(), Ipld::String(WRAP_ALGORITHM_V1.into()));
+        let relabelled = WrappedContentKey::from_ipld(&Ipld::Map(map))?;
+        assert_eq!(relabelled.algorithm(), WRAP_ALGORITHM_V1);
+        assert_eq!(
+            relabelled.unwrap_key(&recipient, b"aad"),
+            Err(Error::Crypto)
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn rewrap_moves_a_key_to_another_recipient() -> TestResult {
+        let owner = SpaceKeyPair::generate()?;
+        let reader = SpaceKeyPair::generate()?;
+        let content_key = [6u8; CONTENT_KEY_LEN];
+        let wrapped =
+            WrappedContentKey::wrap(owner.encapsulation_key_bytes(), &content_key, b"owner")?;
+
+        let shared = wrapped.rewrap(
+            &owner,
+            b"owner",
+            reader.encapsulation_key_bytes(),
+            b"reader",
+        )?;
+        assert_eq!(*shared.unwrap_key(&reader, b"reader")?, content_key);
+        assert_eq!(shared.unwrap_key(&owner, b"reader"), Err(Error::Crypto));
+
+        assert_eq!(
+            wrapped
+                .rewrap(
+                    &reader,
+                    b"owner",
+                    reader.encapsulation_key_bytes(),
+                    b"reader"
+                )
+                .err(),
+            Some(Error::Crypto)
+        );
         Ok(())
     }
 
@@ -415,20 +597,20 @@ mod tests {
         let recipient = SpaceKeyPair::generate()?;
         let content_key = [3u8; CONTENT_KEY_LEN];
         let wrapped =
-            WrappedContentKey::wrap(&recipient.encapsulation_key_bytes()?, &content_key, b"")?;
+            WrappedContentKey::wrap(recipient.encapsulation_key_bytes(), &content_key, b"")?;
 
         let restored =
             SpaceKeyPair::from_decapsulation_key_bytes(&recipient.decapsulation_key_bytes()?)?;
-        assert_eq!(wrapped.unwrap_key(&restored, b"")?, content_key);
+        assert_eq!(*wrapped.unwrap_key(&restored, b"")?, content_key);
 
         // The restored pair gives back the same keys.
         assert_eq!(
-            restored.encapsulation_key_bytes()?,
-            recipient.encapsulation_key_bytes()?
+            restored.encapsulation_key_bytes(),
+            recipient.encapsulation_key_bytes()
         );
         assert_eq!(
-            restored.encapsulation_key_multibase()?,
-            recipient.encapsulation_key_multibase()?
+            restored.encapsulation_key_multibase(),
+            recipient.encapsulation_key_multibase()
         );
         assert_eq!(
             restored.decapsulation_key_bytes()?,
@@ -442,7 +624,7 @@ mod tests {
         let recipient = SpaceKeyPair::generate()?;
         let bytes = recipient.decapsulation_key_bytes()?;
         let wrapped = WrappedContentKey::wrap(
-            &recipient.encapsulation_key_bytes()?,
+            recipient.encapsulation_key_bytes(),
             &[5u8; CONTENT_KEY_LEN],
             b"aad",
         )?;
@@ -488,7 +670,7 @@ mod tests {
     fn ipld_round_trip_and_meta() -> TestResult {
         let recipient = SpaceKeyPair::generate()?;
         let wrapped = WrappedContentKey::wrap(
-            &recipient.encapsulation_key_bytes()?,
+            recipient.encapsulation_key_bytes(),
             &[1u8; CONTENT_KEY_LEN],
             b"aad",
         )?;
@@ -498,7 +680,7 @@ mod tests {
 
         let mut meta = BTreeMap::new();
         wrapped.attach_to_meta(&mut meta);
-        let from_meta = WrappedContentKey::from_meta(&meta).expect("present")?;
+        let from_meta = WrappedContentKey::from_meta(&meta)?.expect("present");
         assert_eq!(from_meta, wrapped);
 
         assert_eq!(
@@ -512,7 +694,7 @@ mod tests {
     fn ipld_decoding_checks_every_length() -> TestResult {
         let recipient = SpaceKeyPair::generate()?;
         let wrapped = WrappedContentKey::wrap(
-            &recipient.encapsulation_key_bytes()?,
+            recipient.encapsulation_key_bytes(),
             &[1u8; CONTENT_KEY_LEN],
             b"aad",
         )?;
@@ -550,17 +732,17 @@ mod tests {
     #[test]
     fn encapsulation_key_survives_a_did_document() -> TestResult {
         let recipient = SpaceKeyPair::generate()?;
-        let published = recipient.encapsulation_key_multibase()?;
+        let published = recipient.encapsulation_key_multibase();
 
         // A wrapper resolves the owner's DID, reads the service entry,
         // decodes the key and wraps to it.
         let decoded = decode_encapsulation_key(&published)?;
-        assert_eq!(decoded, recipient.encapsulation_key_bytes()?);
+        assert_eq!(decoded, recipient.encapsulation_key_bytes());
         assert_eq!(decoded.len(), ENCAPSULATION_KEY_LEN);
 
         let wrapped = WrappedContentKey::wrap(&decoded, &[9u8; CONTENT_KEY_LEN], b"aad")?;
         assert_eq!(
-            wrapped.unwrap_key(&recipient, b"aad")?,
+            *wrapped.unwrap_key(&recipient, b"aad")?,
             [9u8; CONTENT_KEY_LEN]
         );
         Ok(())
@@ -569,7 +751,7 @@ mod tests {
     #[test]
     fn encapsulation_key_decoding_rejects_the_near_misses() -> TestResult {
         let recipient = SpaceKeyPair::generate()?;
-        let good = recipient.encapsulation_key_multibase()?;
+        let good = recipient.encapsulation_key_multibase();
 
         assert_eq!(
             decode_encapsulation_key(&good[1..]),
@@ -626,6 +808,36 @@ mod tests {
     }
 
     #[test]
+    fn a_wrap_bound_to_an_audience_opens_for_no_other() -> TestResult {
+        let recipient = SpaceKeyPair::generate()?;
+        let space = Did::parse("did:bio:devnet:8SFqwqnq4whPhs8icwHA2hQg3hUoN1qrCLK1SBx3WKwe")?;
+        let device = Did::parse("did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK")?;
+        let other = Did::parse("did:key:z6MkiTBz1ymuepAQ4HEHYSF1H8quG5GLVVQR3djdX3mDooWp")?;
+        let command = Command::parse("/space/blob/get")?;
+
+        let aad = space_aad_to(&space, &device, &command);
+        assert_eq!(
+            aad,
+            b"did:bio:devnet:8SFqwqnq4whPhs8icwHA2hQg3hUoN1qrCLK1SBx3WKwe|did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK|/space/blob/get"
+        );
+
+        let content_key = [9u8; CONTENT_KEY_LEN];
+        let wrapped =
+            WrappedContentKey::wrap(recipient.encapsulation_key_bytes(), &content_key, &aad)?;
+        assert_eq!(*wrapped.unwrap_key(&recipient, &aad)?, content_key);
+        assert_eq!(
+            wrapped.unwrap_key(&recipient, &space_aad_to(&space, &other, &command)),
+            Err(Error::Crypto)
+        );
+        assert_eq!(
+            wrapped.unwrap_key(&recipient, &space_aad_for(&space, &command)),
+            Err(Error::Crypto)
+        );
+        Ok(())
+    }
+
+    #[test]
+    #[allow(deprecated)]
     fn typed_aad_matches_the_string_form_and_drops_the_fragment() -> TestResult {
         let space = Did::parse("did:bio:devnet:8SFqwqnq4whPhs8icwHA2hQg3hUoN1qrCLK1SBx3WKwe")?;
         let command = Command::parse("/space/blob/get")?;

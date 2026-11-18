@@ -32,7 +32,7 @@ fn bio_issuer_delegates_wrapped_key_to_pq_device() -> TestResult {
     let command = Command::parse(COMMAND)?;
     let aad = space_aad_for(&space, &command);
     let wrapped =
-        WrappedContentKey::wrap(&device_kem.encapsulation_key_bytes()?, &content_key, &aad)?;
+        WrappedContentKey::wrap(device_kem.encapsulation_key_bytes(), &content_key, &aad)?;
     let mut meta = BTreeMap::new();
     wrapped.attach_to_meta(&mut meta);
 
@@ -56,8 +56,8 @@ fn bio_issuer_delegates_wrapped_key_to_pq_device() -> TestResult {
     let stranger = Ed25519Keypair::from_seed(&[9u8; 32]);
     assert!(received.envelope().verify(stranger.public_key()).is_err());
 
-    let carried = WrappedContentKey::from_meta(received.meta()).expect("wrapped key attached")?;
-    assert_eq!(carried.unwrap_key(&device_kem, &aad)?, content_key);
+    let carried = WrappedContentKey::from_meta(received.meta())?.expect("wrapped key attached");
+    assert_eq!(*carried.unwrap_key(&device_kem, &aad)?, content_key);
 
     // A copy pasted into a grant for another command does not open.
     let other_aad = space_aad_for(&space, &Command::parse("/space/blob/list")?);
@@ -85,7 +85,7 @@ fn owner_publishes_a_key_a_stranger_can_wrap_to() -> TestResult {
     // The wrapper never meets the recipient. It reads the encapsulation key
     // from a DID document service entry.
     let owner = SpaceKeyPair::generate()?;
-    let published = owner.encapsulation_key_multibase()?;
+    let published = owner.encapsulation_key_multibase();
     assert_eq!(pq_space::SPACE_KEY_SERVICE_TYPE, "SpaceEncapsulationKey");
 
     let space = Did::parse("did:bio:devnet:2T6zLFvMx7NJac5qQtiKTaPhMwHLkwKETWjUK1yKv4tc")?;
@@ -95,7 +95,7 @@ fn owner_publishes_a_key_a_stranger_can_wrap_to() -> TestResult {
     let encapsulation_key = pq_space::decode_encapsulation_key(&published)?;
     let wrapped = WrappedContentKey::wrap(&encapsulation_key, &content_key, &aad)?;
 
-    assert_eq!(wrapped.unwrap_key(&owner, &aad)?, content_key);
+    assert_eq!(*wrapped.unwrap_key(&owner, &aad)?, content_key);
     Ok(())
 }
 

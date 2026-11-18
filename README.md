@@ -30,7 +30,9 @@ Delegating a content key takes three steps.
 1. The space owner wraps the 32 byte content key to the recipient's
    ML-KEM-1024 encapsulation key with `WrappedContentKey::wrap`. The AAD
    from `space_aad_for` binds the wrap to the delegation's subject and
-   command.
+   command, and `space_aad_to` binds its audience as well. The wrapping
+   key also depends on the recipient's encapsulation key and on the ML-KEM
+   ciphertext.
 2. The wrap rides in the UCAN delegation's `meta` map under `"space/key"`
    and is signed by the issuer. The issuer may be a `did:bio` researcher
    identity, a classical Ed25519 `did:key` or an ML-DSA-87 `did:key`.
@@ -46,7 +48,8 @@ Delegating a content key takes three steps.
 | `BioSigner` | Signs pq-ucan tokens as a `did:bio` identity with its Ed25519 subject key |
 | `BioResolver` | A pq-ucan `Resolver` for `did:bio`, deferring `did:key` to pq-ucan, for `Delegation::verify` and `Validator` |
 | `SpaceKeyPair` | A recipient's ML-KEM-1024 key pair, with helpers to generate it, persist it and publish its encapsulation key |
-| `WrappedContentKey` | `ML-KEM-1024 -> HKDF-SHA256 -> AES-256-GCM` wrap of a content key, with IPLD encoding and `meta` helpers |
+| `WrappedContentKey` | `ML-KEM-1024 -> HKDF-SHA256 -> AES-256-GCM` wrap of a content key, with IPLD encoding, `meta` helpers and `rewrap` for sharing onward |
+| `seal_blob`, `open_blob` | AES-256-GCM over 64 KiB chunks under a content key, with a key commitment |
 
 The crate level example and
 [`tests/delegation_flow.rs`](tests/delegation_flow.rs) show the whole flow.
@@ -61,6 +64,16 @@ DID document service entry typed `SpaceEncapsulationKey`.
 `decode_encapsulation_key` reads it back and rejects a wrong multicodec or a
 truncated key rather than deferring the failure to encapsulation time.
 
+## Sealing a blob
+
+`generate_content_key` makes the key, `seal_blob` encrypts under it and
+`open_blob` reverses that. The plaintext is cut into 64 KiB chunks. Each
+chunk has its own nonce, a counter and a last chunk flag, so chunks cannot
+be reordered, dropped or cut off at the end. The header carries a salt and
+a commitment to the key, both derived with HKDF-SHA256. AES-GCM does not
+commit to its key on its own, and the commitment makes a blob open under
+one content key only.
+
 ## Encodings
 
 - The ML-DSA-87 `did:key` uses the registered multicodec `mldsa-87-pub`
@@ -68,10 +81,14 @@ truncated key rather than deferring the failure to encapsulation time.
 - The ML-KEM-1024 encapsulation key uses the registered multicodec
   `mlkem-1024-pub` (`0x120d`). It is multibase `z...` over
   `0x8d 0x24 || pk`.
+- A wrapped key is an IPLD map of `alg`, `ct`, `iv` and `key`. `alg` is
+  `ML-KEM-1024+HKDF-SHA256+A256GCM/v2`. Wraps made before 0.3 carry the
+  name without `/v2` and still open.
+- A sealed blob is `"PQSB" || 0x01 || salt (32) || commitment (32)`
+  followed by the chunks, each ending in its 16 byte tag.
 - The varsig header for ML-DSA-87 is the tag `0x1212` with no config
   segments. It stays provisional until the varsig registry includes it. The
-  header belongs to pq-ucan, and this crate adds no wire format of its own
-  beyond the `meta` entry.
+  header belongs to pq-ucan.
 
 ## Status
 

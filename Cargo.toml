@@ -9,10 +9,10 @@ repository = "https://github.com/ekayana-labs/pq-space"
 readme = "README.md"
 keywords = ["ucan", "post-quantum", "ml-kem", "ml-dsa", "did"]
 categories = ["cryptography", "authentication"]
-exclude = [".github/"]
+exclude = [".github/", "fuzz/"]
 
 [dependencies]
-pq-ucan = { version = "0.1.2", default-features = false, features = ["std", "ed25519", "ml-dsa"] }
+pq-ucan = { version = "0.1.3", default-features = false, features = ["std", "ed25519", "ml-dsa"] }
 did-bio-core = { version = "0.2", default-features = false }
 aws-lc-rs = "1.18"
 bs58 = "0.5"
